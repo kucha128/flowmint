@@ -114,10 +114,11 @@ Rust workspace (multiple crates) + Tauri desktop app + multi-language SDKs.
 
 ## Scope & boundaries
 
-- **Implemented**: HTTP capture, HTTPS MITM (with cert-download page & per-OS install), WebSocket frames,
-  response decompression, full headers & body, breakpoints, replay/composer, upstream proxy chaining,
-  one-click system proxy, per-process attribution, Rule IR + offline replay + diff, read-only MCP,
-  local REST API, desktop analyzer, multi-language capture SDK (C ABI, incl. intercept & rewrite).
+- **Implemented**: HTTP capture, HTTPS MITM (with cert-download page & per-OS install), WebSocket frames
+  (desktop can **actively disconnect** a WS/tunnel connection), response decompression, full headers & body,
+  breakpoints, replay/composer, upstream proxy chaining, one-click system proxy, per-process attribution,
+  Rule IR + offline replay + diff, read-only MCP, local REST API, desktop analyzer, multi-language capture
+  SDK (C ABI, incl. HTTP intercept/rewrite & WebSocket frame rewrite/drop/disconnect).
 - **Not yet** (phased by design): TCP/UDP semantic rewrite, WS/TCP/UDP SDK callbacks, Wasm plugins,
   OS driver/TUN, HTTP/3, remote managed agent.
 - **Security boundary**: binds loopback only by default; MITM off by default and requires explicit CA trust;

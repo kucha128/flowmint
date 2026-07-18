@@ -83,7 +83,7 @@ cargo run -p flowmint-cli -- --data mydata mcp serve   # 只读 MCP，供 AI 接
 
 ## ✅ 能力与边界
 
-- **已实现**：HTTP 抓包、HTTPS MITM（含证书下载页/各平台安装）、WebSocket 帧捕获、响应体解压、完整 header 与 Body、**断点改包**、**请求重放/构造器**、**上游代理链**、系统代理一键开关、按进程归属、Rule IR 执行 + 离线回放 + diff、只读 MCP、本地 REST API、桌面分析器、多语言抓包 SDK（C ABI，含 **HTTP 拦截改包**与 **WebSocket 帧拦截改写/丢弃/主动断开**）。
+- **已实现**：HTTP 抓包、HTTPS MITM（含证书下载页/各平台安装）、WebSocket 帧捕获（桌面可**主动断开** WS/隧道连接）、响应体解压、完整 header 与 Body、**断点改包**、**请求重放/构造器**、**上游代理链**、系统代理一键开关、按进程归属、Rule IR 执行 + 离线回放 + diff、只读 MCP、本地 REST API、桌面分析器、多语言抓包 SDK（C ABI，含 **HTTP 拦截改包**与 **WebSocket 帧拦截改写/丢弃/主动断开**）。
 - **尚未实现**（按设计分期）：TCP/UDP 语义改写、WebSocket/TCP/UDP SDK 回调、Wasm 插件、OS 驱动/TUN、HTTP/3、远程受管 agent。
 - **安全边界**：默认仅监听 loopback；MITM 默认关闭且需显式信任 CA；CONNECT 隧道不解密仅记元数据；AI/MCP 默认只读、强制脱敏。仅用于你有权观测与修改的流量。
 

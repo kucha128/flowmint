@@ -84,6 +84,7 @@ async fn breakpoint_modifies_request_and_response() {
         proxy_port: 0,
         ca_pem: None,
         ca_der: None,
+        disconnects: None,
     };
     let proxy = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_addr = proxy.local_addr().unwrap();

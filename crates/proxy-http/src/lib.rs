@@ -72,6 +72,44 @@ pub struct ProxyContext<S: FlowSink> {
     pub ca_pem: Option<Arc<str>>,
     /// profile CA 的 DER 字节（供落地页下载：iOS 用 `.cer`）。
     pub ca_der: Option<Arc<[u8]>>,
+    /// 主动断开注册表（`None` 表示不支持主动断开）。
+    pub disconnects: Option<Arc<DisconnectHub>>,
+}
+
+/// 主动断开注册表：按 flow_id 向正在进行的连接（WS/隧道 relay）发断开信号。
+#[derive(Default)]
+pub struct DisconnectHub {
+    map: std::sync::Mutex<std::collections::HashMap<String, tokio::sync::broadcast::Sender<()>>>,
+}
+
+impl DisconnectHub {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// relay 开始时订阅该 flow 的断开信号。
+    fn subscribe(&self, flow_id: &str) -> tokio::sync::broadcast::Receiver<()> {
+        let mut m = self.map.lock().unwrap();
+        let tx = m
+            .entry(flow_id.to_string())
+            .or_insert_with(|| tokio::sync::broadcast::channel(1).0);
+        tx.subscribe()
+    }
+
+    /// relay 结束时清理。
+    fn done(&self, flow_id: &str) {
+        self.map.lock().unwrap().remove(flow_id);
+    }
+
+    /// 主动断开某个 flow；返回该连接是否存在。
+    pub fn disconnect(&self, flow_id: &str) -> bool {
+        self.map
+            .lock()
+            .unwrap()
+            .get(flow_id)
+            .map(|tx| tx.send(()).is_ok())
+            .unwrap_or(false)
+    }
 }
 
 impl<S: FlowSink> Clone for ProxyContext<S> {
@@ -86,6 +124,7 @@ impl<S: FlowSink> Clone for ProxyContext<S> {
             proxy_port: self.proxy_port,
             ca_pem: self.ca_pem.clone(),
             ca_der: self.ca_der.clone(),
+            disconnects: self.disconnects.clone(),
         }
     }
 }
@@ -300,9 +339,12 @@ async fn handle_connect_tunnel<S: FlowSink>(
 
     let (mut cr, mut cw) = tokio::io::split(client);
     let (mut ur, mut uw) = tokio::io::split(upstream);
-    let c2s = tokio::io::copy(&mut cr, &mut uw);
-    let s2c = tokio::io::copy(&mut ur, &mut cw);
-    let _ = tokio::join!(c2s, s2c);
+    run_with_disconnect(&ctx.disconnects, flow_id.as_str(), async {
+        let c2s = tokio::io::copy(&mut cr, &mut uw);
+        let s2c = tokio::io::copy(&mut ur, &mut cw);
+        let _ = tokio::join!(c2s, s2c);
+    })
+    .await;
 
     ctx.sink.record_event(mk_event(
         &ctx,
@@ -373,8 +415,20 @@ async fn handle_connect_mitm<S: FlowSink>(
     let (cr, mut cw) = tokio::io::split(tls_client);
     let mut client_reader = BufReader::new(cr);
 
+    // 订阅该隧道的主动断开信号（桌面可断开一个 HTTPS/wss 会话）。
+    let mut disc_rx = ctx
+        .disconnects
+        .as_ref()
+        .map(|hub| hub.subscribe(tunnel_id.as_str()));
+
     loop {
-        let req_bytes = read_head_bytes(&mut client_reader).await?;
+        let req_bytes = tokio::select! {
+            r = read_head_bytes(&mut client_reader) => match r {
+                Ok(b) => b,
+                Err(_) => break,
+            },
+            _ = wait_disconnect(disc_rx.as_mut()) => break, // 主动断开
+        };
         if req_bytes.is_empty() {
             break; // client closed the tunnel
         }
@@ -466,6 +520,9 @@ async fn handle_connect_mitm<S: FlowSink>(
         if is_upgrade {
             break;
         }
+    }
+    if let Some(hub) = ctx.disconnects.as_ref() {
+        hub.done(tunnel_id.as_str());
     }
     Ok(())
 }
@@ -660,8 +717,40 @@ async fn relay_plain_ws<S: FlowSink>(
         client_ep,
         None,
     );
-    let _ = tokio::join!(c2s, s2c);
+    run_with_disconnect(&ctx.disconnects, flow_id.as_str(), async {
+        let _ = tokio::join!(c2s, s2c);
+    })
+    .await;
     Ok(())
+}
+
+/// 等待一个断开信号；若没有订阅（`None`）则永不返回，可安全用于 `select!` 分支。
+async fn wait_disconnect(rx: Option<&mut tokio::sync::broadcast::Receiver<()>>) {
+    match rx {
+        Some(rx) => {
+            let _ = rx.recv().await;
+        }
+        None => std::future::pending::<()>().await,
+    }
+}
+
+/// 跑一个 relay future；若期间收到该 flow 的主动断开信号，则提前结束（丢弃两端连接）。
+async fn run_with_disconnect<F: std::future::Future<Output = ()>>(
+    disconnects: &Option<Arc<DisconnectHub>>,
+    flow_id: &str,
+    relay: F,
+) {
+    match disconnects {
+        Some(hub) => {
+            let mut rx = hub.subscribe(flow_id);
+            tokio::select! {
+                _ = relay => {}
+                _ = rx.recv() => {}
+            }
+            hub.done(flow_id);
+        }
+        None => relay.await,
+    }
 }
 
 /// Pump WebSocket frames from `from` to `to`, recording each. `mask` re-masks

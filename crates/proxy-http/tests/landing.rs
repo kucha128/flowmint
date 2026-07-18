@@ -41,6 +41,7 @@ async fn landing_page_and_cert_download() {
         proxy_port: 0,
         ca_pem: Some(Arc::from(CA_PEM)),
         ca_der: Some(Arc::from(CA_DER)),
+        disconnects: None,
     };
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

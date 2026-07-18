@@ -711,6 +711,7 @@ pub unsafe extern "C" fn fm_start(ctx: *mut FmContext) -> bool {
         proxy_port: 0,
         ca_pem: None,
         ca_der: None,
+        disconnects: None,
     };
     let handle = rt.spawn(flowmint_proxy_http::serve(listener, pctx));
 

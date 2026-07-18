@@ -9,7 +9,8 @@ use std::pin::Pin;
 
 use flowmint_model::{CaptureId, Clock, EventKind, Flow, NetworkEvent, PayloadRef, RedactionState};
 use flowmint_proxy_http::{
-    serve, ws, Decision, FlowSink, InterceptHook, InterceptMessage, ProxyContext, WsDecision,
+    serve, ws, Decision, DisconnectHub, FlowSink, InterceptHook, InterceptMessage, ProxyContext,
+    WsDecision,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -43,10 +44,31 @@ impl InterceptHook for WsHook {
 
 struct TestSink {
     events: Mutex<Vec<NetworkEvent>>,
+    flows: Mutex<Vec<Flow>>,
+}
+
+impl TestSink {
+    fn new() -> Self {
+        Self {
+            events: Mutex::new(Vec::new()),
+            flows: Mutex::new(Vec::new()),
+        }
+    }
+    /// 返回首个 WebSocket flow 的 id（用于主动断开测试）。
+    fn ws_flow_id(&self) -> Option<String> {
+        self.flows
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|f| f.l7.as_deref() == Some("websocket"))
+            .map(|f| f.flow_id.to_string())
+    }
 }
 
 impl FlowSink for TestSink {
-    fn upsert_flow(&self, _f: Flow) {}
+    fn upsert_flow(&self, f: Flow) {
+        self.flows.lock().unwrap().push(f);
+    }
     fn record_event(&self, e: NetworkEvent) {
         self.events.lock().unwrap().push(e);
     }
@@ -115,9 +137,7 @@ async fn ws_frames_are_captured_through_proxy() {
     tokio::spawn(ws_echo_server(echo_listener));
 
     // Proxy on a random port.
-    let sink = Arc::new(TestSink {
-        events: Mutex::new(Vec::new()),
-    });
+    let sink = Arc::new(TestSink::new());
     let ctx = ProxyContext {
         sink: sink.clone(),
         capture_id: CaptureId::new(),
@@ -128,6 +148,7 @@ async fn ws_frames_are_captured_through_proxy() {
         proxy_port: 0,
         ca_pem: None,
         ca_der: None,
+        disconnects: None,
     };
     let proxy_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_addr = proxy_listener.local_addr().unwrap();
@@ -199,9 +220,7 @@ async fn ws_upgrade(hook: Option<Arc<dyn InterceptHook>>) -> TcpStream {
     let echo_addr = echo_listener.local_addr().unwrap();
     tokio::spawn(ws_echo_server(echo_listener));
 
-    let sink = Arc::new(TestSink {
-        events: Mutex::new(Vec::new()),
-    });
+    let sink = Arc::new(TestSink::new());
     let ctx = ProxyContext {
         sink,
         capture_id: CaptureId::new(),
@@ -212,6 +231,7 @@ async fn ws_upgrade(hook: Option<Arc<dyn InterceptHook>>) -> TcpStream {
         proxy_port: 0,
         ca_pem: None,
         ca_der: None,
+        disconnects: None,
     };
     let proxy_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_addr = proxy_listener.local_addr().unwrap();
@@ -268,4 +288,81 @@ async fn ws_closed_by_hook() {
         Ok(Some(f)) => assert_eq!(f.opcode, ws::Opcode::Close),
         Ok(None) | Err(_) => {} // EOF / 断开也算成功
     }
+}
+
+/// 桌面「主动断开」：通过 DisconnectHub 按 flow_id 断开一个进行中的 ws 会话，
+/// 客户端随即读到 EOF。
+#[tokio::test]
+async fn ws_disconnected_by_hub() {
+    let echo_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let echo_addr = echo_listener.local_addr().unwrap();
+    tokio::spawn(ws_echo_server(echo_listener));
+
+    let sink = Arc::new(TestSink::new());
+    let hub = Arc::new(DisconnectHub::new());
+    let ctx = ProxyContext {
+        sink: sink.clone(),
+        capture_id: CaptureId::new(),
+        clock: Clock::start_now(),
+        mitm: None,
+        hook: None,
+        upstream_proxy: None,
+        proxy_port: 0,
+        ca_pem: None,
+        ca_der: None,
+        disconnects: Some(hub.clone()),
+    };
+    let proxy_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let proxy_addr = proxy_listener.local_addr().unwrap();
+    tokio::spawn(serve(proxy_listener, ctx));
+
+    let mut client = TcpStream::connect(proxy_addr).await.unwrap();
+    let req = format!(
+        "GET http://{echo_addr}/ws HTTP/1.1\r\nHost: {echo_addr}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
+    );
+    client.write_all(req.as_bytes()).await.unwrap();
+    client.flush().await.unwrap();
+    let mut head = Vec::new();
+    let mut b = [0u8; 1];
+    loop {
+        let n = client.read(&mut b).await.unwrap();
+        assert_ne!(n, 0, "eof before 101");
+        head.push(b[0]);
+        if head.ends_with(b"\r\n\r\n") {
+            break;
+        }
+    }
+
+    // 一来一回，确认帧正常流动 + relay 已注册到 hub。
+    client.write_all(&text_frame(b"ping")).await.unwrap();
+    client.flush().await.unwrap();
+    assert_eq!(
+        ws::read_frame(&mut client).await.unwrap().unwrap().payload,
+        b"ping"
+    );
+
+    // 找到 ws flow_id 并主动断开。
+    let flow_id = {
+        let mut id = None;
+        for _ in 0..50 {
+            if let Some(f) = sink.ws_flow_id() {
+                id = Some(f);
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        id.expect("no websocket flow recorded")
+    };
+    assert!(hub.disconnect(&flow_id), "flow should be live");
+
+    // 断开后客户端读到 EOF（0 字节）。
+    let mut buf = [0u8; 64];
+    let n = tokio::time::timeout(Duration::from_secs(2), client.read(&mut buf))
+        .await
+        .expect("read timed out — connection not closed")
+        .unwrap();
+    assert_eq!(n, 0, "expected EOF after disconnect, got {n} bytes");
+
+    // 未知 flow_id 返回 false。
+    assert!(!hub.disconnect("flow_does_not_exist"));
 }

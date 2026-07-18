@@ -73,6 +73,9 @@ export const setSystemProxy = (port: number) => invoke<void>("set_system_proxy",
 
 export const clearSystemProxy = () => invoke<void>("clear_system_proxy");
 
+/// 主动断开一个进行中的连接（WS 会话 / 隧道）。返回该连接当时是否仍在进行。
+export const disconnectFlow = (flowId: string) => invoke<boolean>("disconnect_flow", { flowId });
+
 export interface SendResult {
   status: number;
   headers: [string, string][];

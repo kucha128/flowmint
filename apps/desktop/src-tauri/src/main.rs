@@ -120,6 +120,13 @@ fn regenerate_ca(state: State<'_, AppState>) -> Result<(), String> {
     state.engine.regenerate_ca().map(|_| ()).map_err(|e| e.to_string())
 }
 
+/// 主动断开一个进行中的连接（WS 会话 / 隧道），按 flow_id。
+/// 返回该连接当时是否仍在进行。
+#[tauri::command]
+fn disconnect_flow(state: State<'_, AppState>, flow_id: String) -> Result<bool, String> {
+    Ok(state.engine.disconnect_flow(&flow_id))
+}
+
 /// 把系统代理设为 127.0.0.1:port 并开启。
 #[tauri::command]
 fn set_system_proxy(_state: State<'_, AppState>, port: u16) -> Result<(), String> {
@@ -286,6 +293,7 @@ fn main() {
             is_ca_installed,
             set_system_proxy,
             clear_system_proxy,
+            disconnect_flow,
             send_request,
             set_breakpoints,
             resume_breakpoint,

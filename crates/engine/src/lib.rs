@@ -59,6 +59,8 @@ pub struct Engine {
     root: PathBuf,
     live: broadcast::Sender<Flow>,
     interceptor: Arc<breakpoint::Interceptor>,
+    /// 主动断开注册表：桌面据 flow_id 断开进行中的 WS/隧道连接。
+    disconnects: Arc<flowmint_proxy_http::DisconnectHub>,
     /// 手动请求（重放/构造器）归属的 capture，首次发送时惰性创建。
     manual_capture: Arc<Mutex<Option<CaptureId>>>,
 }
@@ -74,8 +76,15 @@ impl Engine {
             root,
             live,
             interceptor: Arc::new(breakpoint::Interceptor::new()),
+            disconnects: Arc::new(flowmint_proxy_http::DisconnectHub::new()),
             manual_capture: Arc::new(Mutex::new(None)),
         })
+    }
+
+    /// 主动断开一个进行中的连接（WS 会话、CONNECT/MITM 隧道），按 flow_id。
+    /// 返回该连接当时是否存在（存在才发出了断开信号）。
+    pub fn disconnect_flow(&self, flow_id: &str) -> bool {
+        self.disconnects.disconnect(flow_id)
     }
 
     // --- 断点改包（design §9 Breakpoint Editor）------------------------
@@ -203,6 +212,7 @@ impl Engine {
             proxy_port: bind.port(),
             ca_pem: Some(ca_pem),
             ca_der: Some(ca_der),
+            disconnects: Some(self.disconnects.clone()),
         };
         flowmint_proxy_http::run(bind, ctx).await?;
         Ok(())

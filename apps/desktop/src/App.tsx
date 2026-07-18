@@ -1,9 +1,10 @@
 // 顶层组件：持有全局状态与后端交互逻辑，组合菜单栏 / 工具栏 / 会话列表 / 检查器 / 构造器 / 断点编辑器 / 对话框 / 右键菜单。
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  captureStatus, clearStorage, clearSystemProxy, exportHar, flowDetail, getConfig, installCa,
-  isCaInstalled, onBreakpoint, onFlow, regenerateCa, resumeBreakpoint, searchFlows, setBreakpoints,
-  setConfig, setSystemProxy, startCapture, stopCapture, type Flow, type FlowDetail, type PausedMessage,
+  captureStatus, clearStorage, clearSystemProxy, disconnectFlow, exportHar, flowDetail, getConfig,
+  installCa, isCaInstalled, onBreakpoint, onFlow, regenerateCa, resumeBreakpoint, searchFlows,
+  setBreakpoints, setConfig, setSystemProxy, startCapture, stopCapture, type Flow, type FlowDetail,
+  type PausedMessage,
 } from "./lib/api";
 import { curlOf, seedFromDetail, urlFromFlow, type ComposerSeed } from "./lib/format";
 import { MenuBar, type MenuDef } from "./components/MenuBar";
@@ -209,7 +210,15 @@ export default function App() {
     setFlows((prev) => prev.filter((x) => x.flow_id !== f.flow_id));
     if (sel === f.flow_id) { setSel(null); setDetail(null); }
   }
+  async function disconnect(f: Flow) {
+    try {
+      const live = await disconnectFlow(f.flow_id);
+      setBanner(live ? "已断开该连接" : "该连接已结束，无需断开");
+    } catch (e) { setBanner(String(e)); }
+  }
   function openContext(f: Flow, x: number, y: number) {
+    // ws/wss 会话与未解密的 CONNECT/TLS 隧道是长连接，可主动断开。
+    const isLive = f.l7 === "websocket" || f.l7 === "connect" || f.l7 === "tls";
     setCtx({ x, y, items: [
       { label: "复制 URL", onClick: () => copyText(urlFromFlow(f), "已复制 URL") },
       { label: "复制为 cURL", onClick: async () => { const d = await flowDetail(f.flow_id); copyText(curlOf(d), "已复制 cURL"); } },
@@ -223,6 +232,7 @@ export default function App() {
       { label: "重发（构造器）", onClick: () => replayFlow(f) },
       { label: "导出此主机 HAR", onClick: () => exportHar(f.host || undefined).then((p) => setBanner("HAR → " + p)).catch((e) => setBanner(String(e))) },
       { sep: true },
+      ...(isLive ? [{ label: "断开连接", onClick: () => disconnect(f) }] : []),
       { label: "从列表移除", onClick: () => removeFlow(f) },
     ] });
   }
