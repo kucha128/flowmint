@@ -1,0 +1,25 @@
+id: rewrite-profile-for-development
+name: Rewrite profile response for development
+version: 1.0.0
+match:
+  protocol: http
+  host: 127.0.0.1
+  method: GET
+  path: /v1/profile
+actions:
+  - redact:
+      fields: [authorization]
+  - json_patch:
+      target: response.body
+      operations:
+        - op: replace
+          path: /features/experimental
+          value: true
+limits:
+  max_body_bytes: 1048576
+  timeout_ms: 20
+fallback: pass_through
+scope:
+  environment: development
+  allow_hosts: [127.0.0.1]
+audit_label: development-feature-test

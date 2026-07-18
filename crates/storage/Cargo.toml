@@ -1,0 +1,17 @@
+[package]
+name = "flowmint-storage"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "FlowMint SQLite index + content-addressed chunk store (.fma later)"
+
+[dependencies]
+flowmint-model.workspace = true
+rusqlite.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+hex.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

@@ -1,0 +1,34 @@
+# Rust
+/target
+**/target/
+**/*.rs.bk
+Cargo.lock.orig
+
+# FlowMint local capture data (never commit captured traffic)
+/data
+/data-*
+/demo
+*.fma
+*.sqlite
+*.sqlite-*
+*.har
+
+# Tauri generated schemas (regenerated on build)
+apps/desktop/src-tauri/gen/
+
+# Node / Tauri（桌面应用前端）
+node_modules
+dist
+.tauri
+
+# Python / Java 构建缓存
+__pycache__/
+*.pyc
+*.class
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.idea
+.vscode/*
+!.vscode/extensions.json

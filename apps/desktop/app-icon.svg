@@ -1,0 +1,27 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <!-- FlowMint 图标：流动的 chevron（流）汇入下方铸成的钱币（铸/mint） -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1024" y2="1024" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#6ea0ff"/>
+      <stop offset="1" stop-color="#3457d5"/>
+    </linearGradient>
+    <linearGradient id="mark" x1="512" y1="240" x2="512" y2="820" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.92"/>
+      <stop offset="1" stop-color="#ffffff"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="0" y="0" width="1024" height="1024" rx="232" fill="url(#bg)"/>
+  <!-- 顶部柔光 -->
+  <ellipse cx="512" cy="210" rx="540" ry="250" fill="#ffffff" opacity="0.09"/>
+
+  <!-- 流：两道向下汇聚的 chevron -->
+  <g fill="none" stroke="url(#mark)" stroke-width="74" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M352 300 L512 436 L672 300" opacity="0.55"/>
+    <path d="M352 436 L512 572 L672 436" opacity="0.82"/>
+  </g>
+
+  <!-- 铸：白色钱币（环形） -->
+  <circle cx="512" cy="700" r="98" fill="url(#mark)"/>
+  <circle cx="512" cy="700" r="41" fill="#3f63dd"/>
+</svg>

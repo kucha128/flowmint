@@ -1,0 +1,18 @@
+[package]
+name = "flowmint-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "FlowMint engine: capture profiles, lifecycle, proxy -> storage wiring"
+
+[dependencies]
+flowmint-model.workspace = true
+flowmint-storage.workspace = true
+flowmint-tls.workspace = true
+flowmint-proxy-http.workspace = true
+flowmint-rules.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+anyhow.workspace = true
+serde_json.workspace = true
+time = { version = "0.3", features = ["formatting"] }

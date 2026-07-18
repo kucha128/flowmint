@@ -1,0 +1,20 @@
+[package]
+name = "flowmint-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "FlowMint read-only MCP tools with redaction + evidence (design §10)"
+
+[dependencies]
+flowmint-model.workspace = true
+flowmint-engine.workspace = true
+flowmint-storage.workspace = true
+flowmint-rules.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+regex.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

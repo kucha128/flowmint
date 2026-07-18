@@ -1,0 +1,31 @@
+[package]
+name = "flowmint-studio"
+version = "0.1.0"
+edition = "2021"
+description = "FlowMint Studio — desktop MITM traffic analyzer"
+license = "MIT"
+
+# Standalone workspace so the heavy Tauri dep tree stays out of the main
+# `cargo build --workspace` / test runs. Path deps to the FlowMint crates still
+# resolve.
+[workspace]
+
+[[bin]]
+name = "flowmint-studio"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
+winreg = "0.52"
+flowmint-engine = { path = "../../../crates/engine" }
+flowmint-model = { path = "../../../crates/model" }
+flowmint-storage = { path = "../../../crates/storage" }
+
+[profile.release]
+lto = "thin"

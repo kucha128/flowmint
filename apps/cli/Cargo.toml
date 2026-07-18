@@ -1,0 +1,25 @@
+[package]
+name = "flowmint-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "FlowMint CLI: capture, search and export (design §15.5)"
+
+[[bin]]
+name = "flowmint"
+path = "src/main.rs"
+
+[dependencies]
+flowmint-model.workspace = true
+flowmint-storage.workspace = true
+flowmint-engine.workspace = true
+flowmint-rules.workspace = true
+flowmint-mcp.workspace = true
+flowmint-api.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+serde_json.workspace = true
+serde_yaml = "0.9"

@@ -1,0 +1,125 @@
+易语言 FlowMint 绑定（DLL 命令声明 + 用法）
+================================================
+
+说明
+----
+易语言通过「DLL 命令」直接调用 flowmint.dll 的 C ABI。本文件给出各命令的
+声明（把 flowmint.dll 放到程序目录或系统目录），以及回调式抓包与拦截改包的
+用法要点。因本机无易语言编译器，此文件为源码/声明交付，未在本机编译验证。
+
+回调（子程序指针）注意
+----------------------
+- 观察回调 FmHttpCallback：无返回值，参数（整数型 事件指针，整数型 用户数据）。
+- 拦截回调 FmInterceptCallback：返回整数型（0=放行,1=修改并放行,2=丢弃），
+  参数（整数型 消息指针，整数型 用户数据）。
+- 用「取子程序指针()」把你的回调子程序地址传给 fm_set_http_callback /
+  fm_set_intercept_callback。回调在工作线程触发，指针仅回调期间有效。
+
+DLL 命令声明（命令名, 库文件名 flowmint.dll, 对应 C 导出名）
+------------------------------------------------------------
+' 生命周期
+.DLL命令 fm_context_new, 整数型, "flowmint.dll", "fm_context_new"
+.DLL命令 fm_context_free, , "flowmint.dll", "fm_context_free"
+    .参数 ctx, 整数型
+.DLL命令 fm_bind_port, , "flowmint.dll", "fm_bind_port"
+    .参数 ctx, 整数型
+    .参数 port, 短整数型
+.DLL命令 fm_set_mitm, , "flowmint.dll", "fm_set_mitm"
+    .参数 ctx, 整数型
+    .参数 mitm, 逻辑型
+    .参数 insecure_upstream, 逻辑型
+.DLL命令 fm_set_data_dir, , "flowmint.dll", "fm_set_data_dir"
+    .参数 ctx, 整数型
+    .参数 dir, 文本型            ' UTF-8 建议先转字节集
+.DLL命令 fm_set_http_callback, , "flowmint.dll", "fm_set_http_callback"
+    .参数 ctx, 整数型
+    .参数 cb, 子程序指针         ' 取子程序指针(观察回调)
+    .参数 user, 整数型
+.DLL命令 fm_set_intercept_callback, , "flowmint.dll", "fm_set_intercept_callback"
+    .参数 ctx, 整数型
+    .参数 cb, 子程序指针         ' 取子程序指针(拦截回调)
+    .参数 user, 整数型
+.DLL命令 fm_start, 逻辑型, "flowmint.dll", "fm_start"
+    .参数 ctx, 整数型
+.DLL命令 fm_stop, , "flowmint.dll", "fm_stop"
+    .参数 ctx, 整数型
+.DLL命令 fm_last_error, 整数型, "flowmint.dll", "fm_last_error"   ' 返回 char* 指针
+    .参数 ctx, 整数型
+.DLL命令 fm_export_ca, 逻辑型, "flowmint.dll", "fm_export_ca"
+    .参数 ctx, 整数型
+    .参数 out_path, 文本型
+.DLL命令 fm_version, 整数型, "flowmint.dll", "fm_version"          ' 返回 char* 指针
+
+' 观察事件读取（仅回调期间有效）
+.DLL命令 fm_http_event_type, 整数型, "flowmint.dll", "fm_http_event_type"
+    .参数 ev, 整数型
+.DLL命令 fm_http_event_method, 整数型, "flowmint.dll", "fm_http_event_method"
+    .参数 ev, 整数型
+.DLL命令 fm_http_event_url, 整数型, "flowmint.dll", "fm_http_event_url"
+    .参数 ev, 整数型
+.DLL命令 fm_http_event_host, 整数型, "flowmint.dll", "fm_http_event_host"
+    .参数 ev, 整数型
+.DLL命令 fm_http_event_status, 整数型, "flowmint.dll", "fm_http_event_status"
+    .参数 ev, 整数型
+.DLL命令 fm_http_event_body, 整数型, "flowmint.dll", "fm_http_event_body"  ' 返回 uint8* 指针
+    .参数 ev, 整数型
+    .参数 out_len, 整数型, 传址   ' 写出长度
+
+' 拦截改包（仅拦截回调期间有效）
+.DLL命令 fm_intercept_is_response, 整数型, "flowmint.dll", "fm_intercept_is_response"
+    .参数 msg, 整数型
+.DLL命令 fm_intercept_method, 整数型, "flowmint.dll", "fm_intercept_method"
+    .参数 msg, 整数型
+.DLL命令 fm_intercept_url, 整数型, "flowmint.dll", "fm_intercept_url"
+    .参数 msg, 整数型
+.DLL命令 fm_intercept_status, 整数型, "flowmint.dll", "fm_intercept_status"
+    .参数 msg, 整数型
+.DLL命令 fm_intercept_body, 整数型, "flowmint.dll", "fm_intercept_body"
+    .参数 msg, 整数型
+    .参数 out_len, 整数型, 传址
+.DLL命令 fm_intercept_set_body, , "flowmint.dll", "fm_intercept_set_body"
+    .参数 msg, 整数型
+    .参数 data, 字节集           ' 传数组首地址
+    .参数 len, 整数型
+.DLL命令 fm_intercept_set_status, , "flowmint.dll", "fm_intercept_set_status"
+    .参数 msg, 整数型
+    .参数 status, 整数型
+.DLL命令 fm_intercept_set_header, , "flowmint.dll", "fm_intercept_set_header"
+    .参数 msg, 整数型
+    .参数 name, 文本型
+    .参数 value, 文本型
+
+
+用法示例（伪代码）
+------------------
+' 1) 观察抓包
+.局部变量 ctx, 整数型
+ctx ＝ fm_context_new ()
+fm_bind_port (ctx, 8888)
+fm_set_http_callback (ctx, 取子程序指针 (观察回调), 0)
+如果 (fm_start (ctx) ＝ 假)   ' 启动失败
+    输出 (指针到文本 (fm_last_error (ctx)))
+    返回
+' ... 让客户端走 127.0.0.1:8888 代理 ...
+fm_stop (ctx)
+fm_context_free (ctx)
+
+' 观察回调子程序（无返回值）
+.子程序 观察回调
+    .参数 ev, 整数型
+    .参数 user, 整数型
+    输出 (指针到文本 (fm_http_event_url (ev)))
+
+' 2) 拦截改包：在拦截回调里改写并返回 1
+.子程序 拦截回调, 整数型
+    .参数 msg, 整数型
+    .参数 user, 整数型
+    如果 (fm_intercept_is_response (msg) ＝ 1)
+        fm_intercept_set_status (msg, 200)
+        fm_intercept_set_body (msg, 到字节集 ("已改包"), 6)
+    否则
+        fm_intercept_set_header (msg, "X-FlowMint", "hello")
+    返回 (1)   ' 1 = 修改并放行
+
+注：文本型指针（fm_last_error/fm_version/各 *_method/url 等返回 char*）需用
+「指针到文本()」按 UTF-8 转换；Body 指针配合 out_len 用「指针到字节集()」读取。

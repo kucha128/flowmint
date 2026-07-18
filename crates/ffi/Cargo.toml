@@ -1,0 +1,18 @@
+[package]
+name = "flowmint-ffi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "FlowMint 稳定 C ABI 核心：抓包引擎 + 回调，供各语言薄绑定复用（设计 §11）"
+
+[lib]
+name = "flowmint"
+# cdylib 产出 flowmint.dll/.so 供各语言加载；staticlib 供 C/C++ 静态链接。
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+flowmint-model.workspace = true
+flowmint-tls.workspace = true
+flowmint-proxy-http.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "net"] }

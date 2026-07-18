@@ -1,0 +1,18 @@
+[package]
+name = "flowmint-tls"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "FlowMint per-profile CA + on-demand MITM leaf minting (design §7.2)"
+
+[dependencies]
+rcgen.workspace = true
+time.workspace = true
+rustls.workspace = true
+tokio-rustls.workspace = true
+webpki-roots.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
