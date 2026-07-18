@@ -442,14 +442,7 @@ async fn handle_connect_mitm<S: FlowSink>(
         let method = req_head.start_line.0.clone();
         let url = format!("https://{host}:{port}{path}");
 
-        // 请求断点（转发前）。丢弃则关闭隧道。
-        let Some((req_headers, req_body)) =
-            request_breakpoint(&ctx, &method, &url, req_head.headers.clone(), req_body).await
-        else {
-            break;
-        };
-
-        // 连接真实上游 TLS。
+        // 连接真实上游 TLS（ws 升级与普通请求都需要；与明文路径一致：先连再断点）。
         let connector = TlsConnector::from(mitm.client_config.clone());
         let server_name = match ServerName::try_from(host.clone()) {
             Ok(n) => n,
@@ -472,6 +465,31 @@ async fn handle_connect_mitm<S: FlowSink>(
             }
         };
 
+        // WebSocket (wss) 升级：转发握手后进入帧 relay（抓帧 + 拦截改帧/丢帧/断开）。
+        // 升级不走 http_exchange（那会把后续帧当 body 读），也不做请求/响应断点。
+        if is_ws_upgrade(&req_head) {
+            mitm_relay_ws(
+                &mut client_reader,
+                &mut cw,
+                up_tls,
+                &req_head,
+                &path,
+                &host,
+                &client_ep,
+                &server_ep,
+                &ctx,
+            )
+            .await?;
+            break;
+        }
+
+        // 请求断点（转发前）。丢弃则关闭隧道。
+        let Some((req_headers, req_body)) =
+            request_breakpoint(&ctx, &method, &url, req_head.headers.clone(), req_body).await
+        else {
+            break;
+        };
+
         let (status, resp_headers, resp_body) =
             match http_exchange(up_tls, &method, &req_headers, &path, &req_body).await {
                 Ok(v) => v,
@@ -482,15 +500,11 @@ async fn handle_connect_mitm<S: FlowSink>(
                 }
             };
 
-        // 101 升级结束 HTTP 循环（wss 帧捕获后续），不做响应断点。
-        let is_upgrade = status == Some(101);
-        let (status, resp_headers, resp_body) = if is_upgrade {
-            (status, resp_headers, resp_body)
-        } else {
-            match response_breakpoint(&ctx, &method, &url, status, resp_headers, resp_body).await {
-                Some(v) => v,
-                None => break,
-            }
+        // 响应断点（回传前）。
+        let Some((status, resp_headers, resp_body)) =
+            response_breakpoint(&ctx, &method, &url, status, resp_headers, resp_body).await
+        else {
+            break;
         };
 
         capture_exchange(
@@ -513,13 +527,10 @@ async fn handle_connect_mitm<S: FlowSink>(
             status.unwrap_or(0),
             &resp_headers,
             &resp_body,
-            !is_upgrade,
+            true,
         ))
         .await?;
         cw.flush().await?;
-        if is_upgrade {
-            break;
-        }
     }
     if let Some(hub) = ctx.disconnects.as_ref() {
         hub.done(tunnel_id.as_str());
@@ -716,6 +727,104 @@ async fn relay_plain_ws<S: FlowSink>(
         server_ep,
         client_ep,
         None,
+    );
+    run_with_disconnect(&ctx.disconnects, flow_id.as_str(), async {
+        let _ = tokio::join!(c2s, s2c);
+    })
+    .await;
+    Ok(())
+}
+
+/// MITM 解密下的 wss 帧 relay：转发升级握手，然后双向 pump 解密后的帧
+/// （抓帧 + 拦截改帧/丢帧/断开）。`client_reader`/`cw` 是已拆分的客户端 TLS
+/// 读/写半；`up_tls` 是到真实服务器的上游 TLS。行为对标 `relay_plain_ws`，
+/// 区别在于两端都是已解密的 TLS 流，且帧被标记为 secure。
+#[allow(clippy::too_many_arguments)]
+async fn mitm_relay_ws<S, CR, CW, U>(
+    mut client_reader: CR,
+    mut cw: CW,
+    mut up_tls: U,
+    req_head: &Head,
+    path: &str,
+    host: &str,
+    client_ep: &Endpoint,
+    server_ep: &Endpoint,
+    ctx: &ProxyContext<S>,
+) -> std::io::Result<()>
+where
+    S: FlowSink,
+    CR: AsyncRead + Unpin,
+    CW: AsyncWrite + Unpin,
+    U: AsyncRead + AsyncWrite + Unpin,
+{
+    // 转发升级请求（origin-form：MITM 上游已是到真实服务器的直连 TLS）。
+    up_tls
+        .write_all(&build_upgrade_request(req_head, path))
+        .await?;
+    up_tls.flush().await?;
+    let up_head_bytes = read_head_direct(&mut up_tls).await?;
+    let up_head = parse_head(&up_head_bytes);
+    let status = up_head
+        .as_ref()
+        .and_then(|h| h.start_line.1.parse::<u16>().ok());
+
+    // 把握手响应头原样回给客户端（保留 Sec-WebSocket-Accept 等）。
+    cw.write_all(&up_head_bytes).await?;
+    cw.flush().await?;
+
+    if status != Some(101) {
+        // 服务器拒绝升级：盲转发后续字节。
+        let (mut ur, mut uw) = tokio::io::split(up_tls);
+        let _ = tokio::join!(
+            tokio::io::copy(&mut client_reader, &mut uw),
+            tokio::io::copy(&mut ur, &mut cw),
+        );
+        return Ok(());
+    }
+
+    // wss：标记为已解密的 TLS 帧（flow.secure = true）。
+    let tls = Some(TlsInfo {
+        sni: Some(host.to_string()),
+        alpn: None,
+        version: None,
+        decrypted: true,
+    });
+    let flow_id = capture_ws_open(
+        ctx,
+        client_ep,
+        server_ep,
+        host,
+        path,
+        req_head,
+        up_head.as_ref(),
+        tls.clone(),
+    );
+
+    let (ur, uw) = tokio::io::split(up_tls);
+    let seq = Arc::new(AtomicU64::new(2));
+    let c2s = pump_ws(
+        &mut client_reader,
+        uw,
+        Some([0x21, 0x43, 0x65, 0x87]),
+        Direction::ClientToServer,
+        ctx.clone(),
+        flow_id.clone(),
+        seq.clone(),
+        client_ep.clone(),
+        server_ep.clone(),
+        tls.clone(),
+    );
+    let s2c = pump_ws(
+        ur,
+        &mut cw,
+        None,
+        Direction::ServerToClient,
+        ctx.clone(),
+        flow_id.clone(),
+        seq.clone(),
+        server_ep.clone(),
+        client_ep.clone(),
+        tls.clone(),
     );
     run_with_disconnect(&ctx.disconnects, flow_id.as_str(), async {
         let _ = tokio::join!(c2s, s2c);

@@ -151,9 +151,10 @@ C# 用 `OnIntercept(m => { …; return InterceptAction.Modify; })`，Go 用 `OnI
 
 ## 拦截 WebSocket 帧（改帧 / 丢帧 / 主动断开）
 
-ws/wss 抓包默认就有（帧被记录）。要**改帧/丢帧/断开**，注册 WS 帧回调 `fm_set_ws_callback`：
-回调收到每一帧（方向 / opcode / **已解压明文 payload**），返回 `WS_FORWARD`(0) / `WS_MODIFY`(1，配合
-`set_payload`) / `WS_DROP`(2，丢弃该帧) / `WS_CLOSE`(3，**主动断开连接**)。
+ws/wss 抓包默认就有（帧被记录）。**wss 走 MITM 解密**：开 `fm_set_mitm` 并装证书后，wss 的每一帧
+会被解密后逐帧抓取/拦截（与 ws 明文完全一致，回调拿到的是明文 payload）。要**改帧/丢帧/断开**，
+注册 WS 帧回调 `fm_set_ws_callback`：回调收到每一帧（方向 / opcode / **已解压明文 payload**），返回
+`WS_FORWARD`(0) / `WS_MODIFY`(1，配合 `set_payload`) / `WS_DROP`(2，丢弃该帧) / `WS_CLOSE`(3，**主动断开连接**)。
 
 可直接运行的 DEMO（自带本地 ws echo + 客户端）：[sdks/python/demo_ws.py](../sdks/python/demo_ws.py)
 （`python demo_ws.py`，演示把文本帧内容改写）。
@@ -201,6 +202,6 @@ Android 复用 Java 绑定，但需要为目标 ABI 交叉编译动态库：
 
 ## 后续阶段
 
-- WebSocket / TCP / UDP 回调。
+- TCP / UDP 回调（WebSocket 帧回调已实现，ws/wss 均已验证）。
 - 为 C#/Go/易语言/Android 补充可运行的示例与打包脚本（当前 C#/Go/Java/易语言绑定已含改包接口，但未在本机逐一编译验证）。
 - 拦截回调内改写请求/响应头的更细粒度控制（删除头、按连接设置上游代理等）。

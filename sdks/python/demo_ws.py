@@ -7,6 +7,9 @@
 运行（需先 cargo build -p flowmint-ffi --release 生成 flowmint.dll）：
     python demo_ws.py
 无需外网、无需 MITM（明文 ws 即可演示 WS 改帧）。
+
+wss 同理：先 fm.set_mitm(True) 并安装证书（fm.install_ca()），wss 的每一帧会被
+解密后走同一个 on_ws 回调，改帧/丢帧/断开逻辑完全一致——只是多了 MITM 这一步。
 """
 
 from __future__ import annotations
