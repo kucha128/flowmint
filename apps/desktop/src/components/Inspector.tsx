@@ -106,20 +106,44 @@ function HexView({ ev }: { ev?: EventDetail }) {
   return <pre className="body hex">{hexDump(bytesOf(ev))}</pre>;
 }
 
+/** WebSocket 帧时间线：上方列出每帧（方向/类型/长度），点选后下方按字符串或 Hex 展示 payload。 */
 function Frames({ frames }: { frames: EventDetail[] }) {
+  const [sel, setSel] = useState(0);
+  const [mode, setMode] = useState<"str" | "hex">("str");
   if (frames.length === 0) return <div className="empty">无帧</div>;
+  const cur = frames[Math.min(sel, frames.length - 1)];
   return (
-    <div>
-      {frames.map((fr, i) => (
-        <div className="frame" key={i}>
-          <span className={fr.direction === "ClientToServer" ? "dir-cs" : "dir-sc"}>
-            {fr.direction === "ClientToServer" ? "▲ 发送" : "▼ 接收"}
-          </span>{" "}
-          <b>{fr.ws_opcode || "frame"}</b> · {human(fr.body_size)}
-          {fr.body && !fr.is_binary ? <pre className="body">{fr.body}</pre> : null}
+    <div className="ws-frames">
+      <div className="frame-list">
+        {frames.map((fr, i) => {
+          const out = fr.direction === "ClientToServer";
+          return (
+            <div className={"frame-row" + (i === sel ? " sel" : "")} key={i} onClick={() => setSel(i)}>
+              <span className={out ? "dir-cs" : "dir-sc"}>{out ? "▲ 发送" : "▼ 接收"}</span>
+              <span className="fr-op">{fr.ws_opcode || "frame"}</span>
+              <span className="fr-len">{human(fr.body_size)}</span>
+            </div>
+          );
+        })}
+      </div>
+      <div className="frame-detail">
+        <div className="frame-detail-head">
+          <span>{cur.ws_opcode || "frame"} · {cur.body_size} 字节</span>
+          <span style={{ flex: 1 }} />
+          <div className={"tab" + (mode === "str" ? " active" : "")} onClick={() => setMode("str")}>字符串</div>
+          <div className={"tab" + (mode === "hex" ? " active" : "")} onClick={() => setMode("hex")}>Hex</div>
         </div>
-      ))}
+        <pre className={"body" + (mode === "hex" ? " hex" : "")}>{framePayload(cur, mode)}</pre>
+      </div>
     </div>
   );
+}
+
+/** 单帧 payload：Hex 走十六进制转储；字符串视图下二进制帧提示切 Hex。 */
+function framePayload(ev: EventDetail, mode: "str" | "hex"): string {
+  if (!ev.body) return "(空帧，无 payload)";
+  if (mode === "hex") return hexDump(bytesOf(ev));
+  if (ev.is_binary) return "(二进制帧，切到 Hex 查看)";
+  return ev.body;
 }
 

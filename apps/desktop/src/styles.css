@@ -133,8 +133,19 @@ pre.body { font-family: var(--mono); font-size: 12px; white-space: pre-wrap; wor
 pre.hex { white-space: pre; overflow: auto; }
 .section-title { font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); margin: 16px 0 6px; }
 .empty { color: var(--muted); padding: 48px; text-align: center; }
-.frame { font-family: var(--mono); font-size: 12px; padding: 4px 0; border-bottom: 1px dotted var(--line); }
-.frame .dir-cs { color: var(--accent); } .frame .dir-sc { color: var(--ok); }
+/* WebSocket 帧时间线：上方帧列表 + 下方 payload 视图 */
+.ws-frames { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+.frame-list { max-height: 45vh; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+.frame-row { display: flex; align-items: center; gap: 10px; padding: 4px 10px; cursor: pointer;
+  font-family: var(--mono); font-size: 12px; border-bottom: 1px dotted var(--line); }
+.frame-row:last-child { border-bottom: none; }
+.frame-row:hover { background: var(--panel); }
+.frame-row.sel { background: var(--panel-2); }
+.frame-row .dir-cs { color: var(--accent); } .frame-row .dir-sc { color: var(--ok); }
+.frame-row .fr-op { color: var(--text); font-weight: 600; min-width: 84px; }
+.frame-row .fr-len { color: var(--muted); margin-left: auto; }
+.frame-detail-head { display: flex; align-items: center; gap: 4px; font-family: var(--mono);
+  font-size: 12px; color: var(--muted); }
 
 /* composer */
 .composer-row { display: flex; gap: 8px; align-items: center; }
