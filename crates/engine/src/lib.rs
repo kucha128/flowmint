@@ -25,6 +25,8 @@ use tracing::warn;
 pub struct StoreSink {
     store: Arc<Mutex<Store>>,
     live: broadcast::Sender<Flow>,
+    /// 实时帧推送：WebSocket 帧一到就广播（含已解码明文），界面无需轮询即可追加。
+    frames: broadcast::Sender<serde_json::Value>,
 }
 
 impl FlowSink for StoreSink {
@@ -38,6 +40,21 @@ impl FlowSink for StoreSink {
     fn record_event(&self, event: NetworkEvent) {
         if let Err(e) = self.store.lock().unwrap().insert_event(&event) {
             warn!(error = %e, "record_event failed");
+        }
+        // WebSocket 帧：读回明文 payload，广播给界面实时追加（无订阅者则忽略）。
+        if event.kind == EventKind::WebSocketFrame && self.frames.receiver_count() > 0 {
+            let payload = event
+                .payload
+                .as_ref()
+                .map(|p| {
+                    self.store
+                        .lock()
+                        .unwrap()
+                        .get_payload(p)
+                        .unwrap_or_default()
+                })
+                .unwrap_or_default();
+            let _ = self.frames.send(ws_frame_json(&event, &payload));
         }
     }
 
@@ -58,6 +75,8 @@ pub struct Engine {
     store: Arc<Mutex<Store>>,
     root: PathBuf,
     live: broadcast::Sender<Flow>,
+    /// 实时 WebSocket 帧广播（供界面订阅、无需轮询）。
+    frames: broadcast::Sender<serde_json::Value>,
     interceptor: Arc<breakpoint::Interceptor>,
     /// 主动断开注册表：桌面据 flow_id 断开进行中的 WS/隧道连接。
     disconnects: Arc<flowmint_proxy_http::DisconnectHub>,
@@ -71,10 +90,12 @@ impl Engine {
         let root = data_dir.as_ref().to_path_buf();
         let store = Store::open(&root)?;
         let (live, _) = broadcast::channel(4096);
+        let (frames, _) = broadcast::channel(4096);
         Ok(Self {
             store: Arc::new(Mutex::new(store)),
             root,
             live,
+            frames,
             interceptor: Arc::new(breakpoint::Interceptor::new()),
             disconnects: Arc::new(flowmint_proxy_http::DisconnectHub::new()),
             manual_capture: Arc::new(Mutex::new(None)),
@@ -120,6 +141,11 @@ impl Engine {
     /// UI to render sessions as they arrive.
     pub fn subscribe(&self) -> broadcast::Receiver<Flow> {
         self.live.subscribe()
+    }
+
+    /// 订阅实时 WebSocket 帧（每帧一条已解码 JSON）。界面据此追加帧，无需轮询。
+    pub fn subscribe_frames(&self) -> broadcast::Receiver<serde_json::Value> {
+        self.frames.subscribe()
     }
 
     /// Directory holding this profile's CA (design §7.2). Created on demand.
@@ -203,6 +229,7 @@ impl Engine {
             sink: Arc::new(StoreSink {
                 store: self.store.clone(),
                 live: self.live.clone(),
+                frames: self.frames.clone(),
             }),
             capture_id,
             clock,
@@ -403,6 +430,7 @@ impl Engine {
         let sink = StoreSink {
             store: self.store.clone(),
             live: self.live.clone(),
+            frames: self.frames.clone(),
         };
 
         let client_ep = Endpoint {
@@ -688,6 +716,33 @@ fn headers_json(headers: &[(String, String)]) -> serde_json::Value {
             .map(|(k, v)| serde_json::json!({ "name": k, "value": v }))
             .collect(),
     )
+}
+
+/// 把一个 WebSocket 帧事件 + 明文 payload 组装成界面用的 JSON（结构对齐
+/// `flow_detail` 的 event，并额外带 `flow_id` 供前端定位所属会话）。
+fn ws_frame_json(ev: &NetworkEvent, payload: &[u8]) -> serde_json::Value {
+    use serde_json::json;
+    const MAX_BODY: usize = 2 * 1024 * 1024;
+    let shown = &payload[..payload.len().min(MAX_BODY)];
+    let (body, is_binary) = match std::str::from_utf8(shown) {
+        Ok(s) => (json!(s), false),
+        Err(_) => {
+            let hex: String = shown.iter().map(|b| format!("{b:02x}")).collect();
+            (json!(hex), true)
+        }
+    };
+    json!({
+        "flow_id": ev.flow_id.as_str(),
+        "event_id": ev.event_id.as_str(),
+        "kind": "WebSocketFrame",
+        "direction": format!("{:?}", ev.direction),
+        "sequence": ev.sequence,
+        "headers": [],
+        "body": body,
+        "body_size": payload.len(),
+        "is_binary": is_binary,
+        "ws_opcode": ev.attributes.get("ws.opcode"),
+    })
 }
 
 /// 从 `[{name,value}]` 头数组 JSON 中取 `Content-Encoding`（大小写不敏感）。

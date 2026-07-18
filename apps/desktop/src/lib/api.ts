@@ -95,6 +95,13 @@ export const sendRequest = (
 export const onFlow = (cb: (f: Flow) => void): Promise<UnlistenFn> =>
   listen<Flow>("flow", (e) => cb(e.payload));
 
+/// 实时 WebSocket 帧：每帧一条（带 flow_id 标明所属会话），界面据此追加。
+export interface WsFrameEvent extends EventDetail {
+  flow_id: string;
+}
+export const onWsFrame = (cb: (fr: WsFrameEvent) => void): Promise<UnlistenFn> =>
+  listen<WsFrameEvent>("ws_frame", (e) => cb(e.payload));
+
 // --- 断点改包 ---
 export interface PausedMessage {
   id: number;

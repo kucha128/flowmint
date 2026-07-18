@@ -265,6 +265,22 @@ fn main() {
                 }
             });
 
+            // 实时 WebSocket 帧 → Tauri "ws_frame" 事件（界面追加，无需轮询）。
+            let fr_handle = app.handle().clone();
+            let fr_eng = stream_engine.clone();
+            async_runtime::spawn(async move {
+                let mut rx = fr_eng.subscribe_frames();
+                loop {
+                    match rx.recv().await {
+                        Ok(frame) => {
+                            let _ = fr_handle.emit("ws_frame", frame);
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    }
+                }
+            });
+
             // 断点挂起消息 → Tauri "breakpoint" 事件。
             let bp_handle = app.handle().clone();
             let bp_eng = stream_engine.clone();
