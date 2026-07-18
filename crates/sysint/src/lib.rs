@@ -80,16 +80,21 @@ mod imp {
         }
     }
 
-    /// 该 CA（DER）是否已装进当前用户根存储：按 SHA-1 指纹在 Root 里查。
+    /// 该 CA（DER）是否已装进当前用户根存储：算 SHA-1 指纹，在 certutil 列出的
+    /// Root 存储里按指纹匹配（去掉空白再比，规避大小写/分隔与本地化标签差异）。
     pub fn is_ca_installed(cert_der: &[u8]) -> bool {
         use sha1::{Digest, Sha1};
         let thumb = Sha1::digest(cert_der);
         let hex: String = thumb.iter().map(|b| format!("{b:02x}")).collect();
         match Command::new("certutil")
-            .args(["-user", "-store", "Root", &hex])
+            .args(["-user", "-store", "Root"])
             .output()
         {
-            Ok(o) => o.status.success(),
+            Ok(o) => {
+                let dump = String::from_utf8_lossy(&o.stdout).to_lowercase();
+                let compact: String = dump.chars().filter(|c| !c.is_whitespace()).collect();
+                compact.contains(&hex)
+            }
             Err(_) => false,
         }
     }

@@ -527,6 +527,7 @@ dependencies = [
 name = "flowmint-tls"
 version = "0.1.0"
 dependencies = [
+ "pem",
  "rcgen",
  "rustls",
  "tempfile",

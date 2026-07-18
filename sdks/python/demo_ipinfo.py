@@ -1,24 +1,20 @@
 """FlowMint Python demo：把 https://ipinfo.io/json 响应里的 ip 字段改成 12.34.56.78。
 
-启动 FlowMint 代理（开 MITM，用内置默认证书），拦截 ipinfo.io/json 的响应，改写 JSON 的 ip 字段。
-客户端走该代理请求，并信任 FlowMint 导出的 CA，最终收到改写后的 ip。
+流程（全用 SDK 接口，Windows）：
+  1. 启动代理（开 MITM，用内置默认证书）并设置拦截回调（改 ip）。
+  2. 检查默认证书是否已安装；未安装则调用 SDK 安装到本机受信任根存储。
+  3. 把系统代理指向 FlowMint。
+  4. 提示用户用浏览器访问 https://ipinfo.io/json，会看到 ip 被改成 12.34.56.78。
+  5. 用户按任意键后关闭系统代理并退出。
 
-运行（需能访问 ipinfo.io）：
+运行（需先 cargo build -p flowmint-ffi --release 生成 flowmint.dll）：
     python demo_ipinfo.py
-（需先 cargo build -p flowmint-ffi --release 生成 flowmint.dll）
-
-若本机需经上游代理才能上网，设环境变量：FLOWMINT_UPSTREAM=127.0.0.1:10809
 """
 
 from __future__ import annotations
 
 import json
-import os
-import ssl
 import sys
-import tempfile
-import time
-import urllib.request
 
 import flowmint
 
@@ -29,7 +25,6 @@ except Exception:
 
 FAKE_IP = "12.34.56.78"
 PROXY_PORT = 18890
-TARGET = "https://ipinfo.io/json"
 
 
 def on_intercept(m: flowmint.Intercept) -> int:
@@ -38,7 +33,6 @@ def on_intercept(m: flowmint.Intercept) -> int:
         try:
             data = json.loads(m.body.decode("utf-8"))
         except Exception:
-            print("[跳过] 响应不是 JSON（可能被压缩）")
             return flowmint.CONTINUE
         old = data.get("ip")
         data["ip"] = FAKE_IP
@@ -48,41 +42,48 @@ def on_intercept(m: flowmint.Intercept) -> int:
     return flowmint.CONTINUE
 
 
+def press_any_key(prompt: str) -> None:
+    print(prompt, end="", flush=True)
+    try:
+        import msvcrt
+
+        msvcrt.getch()
+    except ImportError:
+        input()
+    print()
+
+
 def main() -> None:
     fm = flowmint.FlowMint()
+    # 1) 启动 + 设置回调
     fm.bind_port(PROXY_PORT).set_mitm(True).on_intercept(on_intercept)
-    up = os.environ.get("FLOWMINT_UPSTREAM")
-    if up:
-        fm.set_upstream_proxy(up)  # 出站经上游代理上网
     fm.start()
-    time.sleep(0.3)
 
-    # 导出当前 CA（默认证书），供客户端信任
-    ca_path = os.path.join(tempfile.gettempdir(), "flowmint-demo-ca.pem")
-    fm.export_ca(ca_path)
-
-    try:
-        ctx = ssl.create_default_context(cafile=ca_path)
-        proxy = f"http://127.0.0.1:{PROXY_PORT}"
-        opener = urllib.request.build_opener(
-            urllib.request.ProxyHandler({"http": proxy, "https": proxy}),
-            urllib.request.HTTPSHandler(context=ctx),
-        )
-        req = urllib.request.Request(
-            TARGET,
-            headers={"Accept-Encoding": "identity", "User-Agent": "flowmint-demo"},
-        )
-        with opener.open(req, timeout=15) as resp:
-            body = json.loads(resp.read().decode("utf-8"))
-
-        print("\n==== 客户端最终收到 ====")
-        print(json.dumps(body, ensure_ascii=False, indent=2))
-        ok = body.get("ip") == FAKE_IP
-        print("\n改包" + ("成功 [OK]" if ok else "未生效 [FAIL]"))
-        raise SystemExit(0 if ok else 1)
-    finally:
+    # 2) 证书：未安装则安装默认证书
+    if fm.is_ca_installed():
+        print("默认证书已安装。")
+    elif fm.install_ca():
+        print("已安装默认证书到本机受信任根存储。")
+    else:
+        print("安装证书失败：", fm.last_error())
         fm.stop()
         fm.close()
+        return
+
+    # 3) 设置系统代理
+    if not fm.set_system_proxy(PROXY_PORT):
+        print("设置系统代理失败：", fm.last_error())
+
+    try:
+        print(f"\n系统代理已指向 FlowMint（127.0.0.1:{PROXY_PORT}）。")
+        print("现在用浏览器访问  https://ipinfo.io/json  ——ip 会显示为", FAKE_IP)
+        press_any_key("\n按任意键关闭代理并退出...")
+    finally:
+        # 4) 关闭系统代理并停止
+        fm.clear_system_proxy()
+        fm.stop()
+        fm.close()
+        print("已关闭系统代理，退出。")
 
 
 if __name__ == "__main__":

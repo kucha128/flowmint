@@ -47,6 +47,8 @@ pub struct CertAuthority {
     ca_cert: rcgen::Certificate,
     ca_key: KeyPair,
     ca_pem: String,
+    /// 原始 PEM 对应的 DER（= 实际安装/被信任的那张证书；不能用重签后的 ca_cert.der()）。
+    ca_der: Vec<u8>,
     cache: Mutex<HashMap<String, Arc<CertifiedKey>>>,
 }
 
@@ -56,6 +58,20 @@ const DEFAULT_CA_PEM: &str = include_str!("../default-ca/ca.pem");
 const DEFAULT_CA_KEY_PEM: &str = include_str!("../default-ca/ca.key.pem");
 
 impl CertAuthority {
+    /// 从 (ca_cert, ca_key, ca_pem) 组装，附带从原始 PEM 解析出的 DER。
+    fn build(ca_cert: rcgen::Certificate, ca_key: KeyPair, ca_pem: String) -> Self {
+        let ca_der = pem::parse(&ca_pem)
+            .map(|p| p.contents().to_vec())
+            .unwrap_or_default();
+        Self {
+            ca_cert,
+            ca_key,
+            ca_pem,
+            ca_der,
+            cache: Mutex::new(HashMap::new()),
+        }
+    }
+
     /// Load the CA from `dir` (ca.pem + ca.key.pem), creating a fresh one on
     /// first use.
     pub fn load_or_create(dir: impl AsRef<Path>) -> Result<Self> {
@@ -73,23 +89,13 @@ impl CertAuthority {
             // the already-trusted ca.pem.
             let params = CertificateParams::from_ca_cert_pem(&ca_pem)?;
             let ca_cert = params.self_signed(&ca_key)?;
-            Ok(Self {
-                ca_cert,
-                ca_key,
-                ca_pem,
-                cache: Mutex::new(HashMap::new()),
-            })
+            Ok(Self::build(ca_cert, ca_key, ca_pem))
         } else {
             let (ca_cert, ca_key) = Self::generate_ca()?;
             let ca_pem = ca_cert.pem();
             fs::write(&cert_path, &ca_pem)?;
             fs::write(&key_path, ca_key.serialize_pem())?;
-            Ok(Self {
-                ca_cert,
-                ca_key,
-                ca_pem,
-                cache: Mutex::new(HashMap::new()),
-            })
+            Ok(Self::build(ca_cert, ca_key, ca_pem))
         }
     }
 
@@ -98,12 +104,7 @@ impl CertAuthority {
         let ca_key = KeyPair::from_pem(key_pem)?;
         let params = CertificateParams::from_ca_cert_pem(cert_pem)?;
         let ca_cert = params.self_signed(&ca_key)?;
-        Ok(Self {
-            ca_cert,
-            ca_key,
-            ca_pem: cert_pem.to_string(),
-            cache: Mutex::new(HashMap::new()),
-        })
+        Ok(Self::build(ca_cert, ca_key, cert_pem.to_string()))
     }
 
     /// 软件内置的**默认共享 CA**（编译进二进制）。⚠️ 私钥是公开的——任何拿到本项目的人
@@ -151,9 +152,9 @@ impl CertAuthority {
         &self.ca_pem
     }
 
-    /// The CA certificate in DER（iOS 等更认这个格式的 `.cer`）。
+    /// The CA certificate in DER（iOS 等更认这个格式的 `.cer`；与 `ca_pem()` 是同一张证书）。
     pub fn ca_der(&self) -> Vec<u8> {
-        self.ca_cert.der().to_vec()
+        self.ca_der.clone()
     }
 
     /// Mint (or fetch cached) a leaf cert+key for `host`, as a rustls
