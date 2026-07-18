@@ -62,6 +62,9 @@ pub enum CaptureCmd {
         /// 上游代理 host:port（把出站流量再转发给它，形成代理链）。
         #[arg(long)]
         upstream: Option<String>,
+        /// 用内置默认共享 CA（⚠️ 私钥公开、仅测试；默认关闭，用本机生成的 CA）。
+        #[arg(long)]
+        default_ca: bool,
     },
 }
 

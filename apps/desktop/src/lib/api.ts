@@ -36,8 +36,9 @@ export interface FlowDetail {
   events: EventDetail[];
 }
 
-export const startCapture = (port: number, mitm: boolean, insecure: boolean, upstream: string | null) =>
-  invoke<void>("start_capture", { port, mitm, insecure, upstream });
+export const startCapture = (
+  port: number, mitm: boolean, insecure: boolean, upstream: string | null, useDefaultCa: boolean,
+) => invoke<void>("start_capture", { port, mitm, insecure, upstream, useDefaultCa });
 
 export const stopCapture = () => invoke<void>("stop_capture");
 
@@ -57,11 +58,12 @@ export interface AppConfig {
   mitm: boolean;
   insecure: boolean;
   upstream: string;
+  use_default_ca: boolean;
 }
 export const getConfig = () => invoke<AppConfig>("get_config");
 export const setConfig = (config: AppConfig) => invoke<void>("set_config", { config });
 
-export const installCa = () => invoke<string>("install_ca");
+export const installCa = (useDefaultCa: boolean) => invoke<string>("install_ca", { useDefaultCa });
 
 export const setSystemProxy = (port: number) => invoke<void>("set_system_proxy", { port });
 

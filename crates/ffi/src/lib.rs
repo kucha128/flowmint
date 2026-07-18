@@ -17,7 +17,6 @@ use std::collections::HashMap;
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::future::Future;
 use std::net::SocketAddr;
-use std::path::Path;
 use std::pin::Pin;
 use std::ptr;
 use std::slice;
@@ -417,7 +416,8 @@ pub struct FmContext {
     port: u16,
     mitm: bool,
     insecure_upstream: bool,
-    data_dir: String,
+    /// MITM CA：`Some((cert_pem, key_pem))` 用调用方设的证书（不落地）；`None` 用内置默认 CA。
+    ca: Option<(String, String)>,
     target: CallbackTarget,
     intercept: InterceptTarget,
     runtime: Option<Runtime>,
@@ -429,6 +429,14 @@ impl FmContext {
     fn set_error(&mut self, msg: impl AsRef<str>) {
         self.error = cstr(msg.as_ref());
     }
+
+    /// 当前生效的 CA：设了就用设的（内存 PEM），否则用内置默认共享 CA。
+    fn active_ca(&self) -> Result<CertAuthority, flowmint_tls::TlsError> {
+        match &self.ca {
+            Some((cert, key)) => CertAuthority::from_pem(cert, key),
+            None => CertAuthority::bundled_default(),
+        }
+    }
 }
 
 #[no_mangle]
@@ -437,7 +445,7 @@ pub extern "C" fn fm_context_new() -> *mut FmContext {
         port: 8888,
         mitm: false,
         insecure_upstream: false,
-        data_dir: "flowmint-data".to_string(),
+        ca: None,
         target: CallbackTarget {
             cb: None,
             user: ptr::null_mut(),
@@ -477,14 +485,29 @@ pub unsafe extern "C" fn fm_set_mitm(ctx: *mut FmContext, mitm: bool, insecure_u
     }
 }
 
-/// # Safety: `dir` 必须是有效的以 NUL 结尾的 UTF-8 字符串。
+/// 设置 MITM 用的 CA 证书（**内存 PEM，不落地**）：`cert_pem` + `key_pem`。
+/// 传 NULL 或空串则清除、改用软件内置的默认共享 CA。必须在 `fm_start` 之前调用。
+///
+/// # Safety: 两个参数为有效的以 NUL 结尾的 UTF-8 字符串或 NULL。
 #[no_mangle]
-pub unsafe extern "C" fn fm_set_data_dir(ctx: *mut FmContext, dir: *const c_char) {
-    if let (Some(c), false) = (ctx.as_mut(), dir.is_null()) {
-        if let Ok(s) = CStr::from_ptr(dir).to_str() {
-            c.data_dir = s.to_string();
-        }
-    }
+pub unsafe extern "C" fn fm_set_ca(
+    ctx: *mut FmContext,
+    cert_pem: *const c_char,
+    key_pem: *const c_char,
+) {
+    let Some(c) = ctx.as_mut() else { return };
+    let cert = (!cert_pem.is_null())
+        .then(|| CStr::from_ptr(cert_pem).to_str().ok())
+        .flatten()
+        .filter(|s| !s.is_empty());
+    let key = (!key_pem.is_null())
+        .then(|| CStr::from_ptr(key_pem).to_str().ok())
+        .flatten()
+        .filter(|s| !s.is_empty());
+    c.ca = match (cert, key) {
+        (Some(cert), Some(key)) => Some((cert.to_string(), key.to_string())),
+        _ => None, // 缺任一 → 用默认 CA
+    };
 }
 
 /// 注册 HTTP 回调（传 NULL 清除）。必须在 `fm_start` 之前调用。
@@ -525,7 +548,7 @@ pub unsafe extern "C" fn fm_start(ctx: *mut FmContext) -> bool {
     };
 
     let mitm = if c.mitm {
-        match build_mitm(&c.data_dir, c.insecure_upstream) {
+        match build_mitm(c) {
             Ok(m) => Some(Arc::new(m)),
             Err(e) => {
                 c.set_error(format!("初始化 MITM 失败: {e}"));
@@ -588,7 +611,7 @@ pub unsafe extern "C" fn fm_last_error(ctx: *mut FmContext) -> *const c_char {
     }
 }
 
-/// 导出本实例 profile 的 MITM CA 到 `out_path`。成功返回 true。
+/// 导出当前生效的 MITM CA（PEM）到 `out_path`。成功返回 true。
 #[no_mangle]
 pub unsafe extern "C" fn fm_export_ca(ctx: *mut FmContext, out_path: *const c_char) -> bool {
     let Some(c) = ctx.as_mut() else { return false };
@@ -598,7 +621,7 @@ pub unsafe extern "C" fn fm_export_ca(ctx: *mut FmContext, out_path: *const c_ch
     let Ok(path) = CStr::from_ptr(out_path).to_str() else {
         return false;
     };
-    match CertAuthority::load_or_create(Path::new(&c.data_dir).join("ca")) {
+    match c.active_ca() {
         Ok(ca) => std::fs::write(path, ca.ca_pem()).is_ok(),
         Err(e) => {
             c.set_error(format!("导出 CA 失败: {e}"));
@@ -607,17 +630,67 @@ pub unsafe extern "C" fn fm_export_ca(ctx: *mut FmContext, out_path: *const c_ch
     }
 }
 
+/// 把当前生效的 CA 安装到「当前用户」的受信任根存储（Windows；成功返回 true）。
+/// 非 Windows 平台返回 false 并设错误。
+#[no_mangle]
+pub unsafe extern "C" fn fm_install_ca(ctx: *mut FmContext) -> bool {
+    let Some(c) = ctx.as_mut() else { return false };
+    let pem = match c.active_ca() {
+        Ok(ca) => ca.ca_pem().to_string(),
+        Err(e) => {
+            c.set_error(format!("取 CA 失败: {e}"));
+            return false;
+        }
+    };
+    match install_ca_pem(&pem) {
+        Ok(()) => true,
+        Err(e) => {
+            c.set_error(e);
+            false
+        }
+    }
+}
+
+/// 把 CA PEM 装进当前用户根存储（Windows：写临时文件 + certutil）。
+#[cfg(windows)]
+fn install_ca_pem(pem: &str) -> Result<(), String> {
+    use std::io::Write;
+    let mut path = std::env::temp_dir();
+    path.push(format!("flowmint-ca-{}.pem", std::process::id()));
+    {
+        let mut f = std::fs::File::create(&path).map_err(|e| format!("写临时证书失败: {e}"))?;
+        f.write_all(pem.as_bytes())
+            .map_err(|e| format!("写临时证书失败: {e}"))?;
+    }
+    let out = std::process::Command::new("certutil")
+        .args(["-user", "-addstore", "-f", "Root"])
+        .arg(&path)
+        .output();
+    let _ = std::fs::remove_file(&path);
+    match out {
+        Ok(o) if o.status.success() => Ok(()),
+        Ok(o) => Err(format!(
+            "certutil 失败: {}",
+            String::from_utf8_lossy(&o.stdout)
+        )),
+        Err(e) => Err(format!("执行 certutil 失败: {e}")),
+    }
+}
+
+#[cfg(not(windows))]
+fn install_ca_pem(_pem: &str) -> Result<(), String> {
+    Err("fm_install_ca 仅支持 Windows".to_string())
+}
+
 /// SDK 版本（以 NUL 结尾）。
 #[no_mangle]
 pub extern "C" fn fm_version() -> *const c_char {
     c"0.1.0".as_ptr()
 }
 
-fn build_mitm(data_dir: &str, insecure: bool) -> Result<MitmConfig, flowmint_tls::TlsError> {
-    let ca = Arc::new(CertAuthority::load_or_create(
-        Path::new(data_dir).join("ca"),
-    )?);
-    let client_config = if insecure {
+fn build_mitm(c: &FmContext) -> Result<MitmConfig, flowmint_tls::TlsError> {
+    let ca = Arc::new(c.active_ca()?);
+    let client_config = if c.insecure_upstream {
         flowmint_tls::insecure_upstream_client_config()?
     } else {
         flowmint_tls::upstream_client_config()?

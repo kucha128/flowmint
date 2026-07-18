@@ -73,10 +73,20 @@ func (f *FlowMint) SetMitm(enabled, insecureUpstream bool) {
 	C.fm_set_mitm(f.ctx, C._Bool(enabled), C._Bool(insecureUpstream))
 }
 
-func (f *FlowMint) SetDataDir(dir string) {
-	c := C.CString(dir)
-	defer C.free(unsafe.Pointer(c))
-	C.fm_set_data_dir(f.ctx, c)
+// SetCa 设置 MITM CA（内存 PEM，不落地）；传空串则用软件内置默认 CA。
+func (f *FlowMint) SetCa(certPem, keyPem string) {
+	var cc, ck *C.char
+	if certPem != "" && keyPem != "" {
+		cc, ck = C.CString(certPem), C.CString(keyPem)
+		defer C.free(unsafe.Pointer(cc))
+		defer C.free(unsafe.Pointer(ck))
+	}
+	C.fm_set_ca(f.ctx, cc, ck)
+}
+
+// InstallCa 安装当前生效 CA 到当前用户根存储（Windows）。
+func (f *FlowMint) InstallCa() bool {
+	return bool(C.fm_install_ca(f.ctx))
 }
 
 // OnHttp 注册 HTTP 回调（在工作线程触发）。

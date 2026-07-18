@@ -40,13 +40,15 @@ FmContext*  fm_context_new(void);
 void        fm_context_free(FmContext* ctx);
 void        fm_bind_port(FmContext* ctx, uint16_t port);
 void        fm_set_mitm(FmContext* ctx, bool mitm, bool insecure_upstream);
-void        fm_set_data_dir(FmContext* ctx, const char* dir);
+/* 设置 MITM CA（内存 PEM，不落地）；传 NULL/空则用软件内置默认 CA。fm_start 前调用。 */
+void        fm_set_ca(FmContext* ctx, const char* cert_pem, const char* key_pem);
 void        fm_set_http_callback(FmContext* ctx, FmHttpCallback cb, void* user);
 void        fm_set_intercept_callback(FmContext* ctx, FmInterceptCallback cb, void* user);
 bool        fm_start(FmContext* ctx);   /* 失败返回 false，用 fm_last_error 取原因 */
 void        fm_stop(FmContext* ctx);
 const char* fm_last_error(FmContext* ctx);
-bool        fm_export_ca(FmContext* ctx, const char* out_path);
+bool        fm_export_ca(FmContext* ctx, const char* out_path);  /* 导出当前生效 CA(PEM) */
+bool        fm_install_ca(FmContext* ctx);                       /* 安装当前 CA 到用户根存储(Windows) */
 const char* fm_version(void);
 
 /* ---- 事件读取（仅回调期间有效）---- */

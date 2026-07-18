@@ -60,7 +60,9 @@ def _bind(dll_path: str) -> C.CDLL:
     lib.fm_context_free.argtypes = [p]
     lib.fm_bind_port.argtypes = [p, C.c_uint16]
     lib.fm_set_mitm.argtypes = [p, C.c_bool, C.c_bool]
-    lib.fm_set_data_dir.argtypes = [p, C.c_char_p]
+    lib.fm_set_ca.argtypes = [p, C.c_char_p, C.c_char_p]
+    lib.fm_install_ca.argtypes = [p]
+    lib.fm_install_ca.restype = C.c_bool
     lib.fm_set_http_callback.argtypes = [p, _CB, p]
     lib.fm_start.argtypes = [p]
     lib.fm_start.restype = C.c_bool
@@ -167,9 +169,18 @@ class FlowMint:
         self._lib.fm_set_mitm(self._ctx, enabled, insecure_upstream)
         return self
 
-    def set_data_dir(self, path: str) -> "FlowMint":
-        self._lib.fm_set_data_dir(self._ctx, path.encode())
+    def set_ca(self, cert_pem: Optional[str], key_pem: Optional[str]) -> "FlowMint":
+        """设置 MITM CA（内存 PEM，不落地）。传 None 则用软件内置默认 CA。"""
+        self._lib.fm_set_ca(
+            self._ctx,
+            cert_pem.encode() if cert_pem else None,
+            key_pem.encode() if key_pem else None,
+        )
         return self
+
+    def install_ca(self) -> bool:
+        """把当前生效的 CA 安装到当前用户根存储（Windows）。"""
+        return bool(self._lib.fm_install_ca(self._ctx))
 
     def on_http(self, callback: Callable[[HttpEvent], None]) -> "FlowMint":
         lib = self._lib

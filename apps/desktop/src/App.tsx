@@ -26,6 +26,7 @@ export default function App() {
   const [mitm, setMitm] = useState(false);
   const [insecure, setInsecure] = useState(false);
   const [upstream, setUpstream] = useState("");
+  const [useDefaultCa, setUseDefaultCa] = useState(false);
   const [sysProxy, setSysProxy] = useState(false);
   const [bpEnabled, setBpEnabled] = useState(false);
   const [pausedQueue, setPausedQueue] = useState<PausedMessage[]>([]);
@@ -40,7 +41,8 @@ export default function App() {
   useEffect(() => {
     // 从运行目录的配置文件恢复设置。
     getConfig().then((c) => {
-      setPort(c.port); setMitm(c.mitm); setInsecure(c.insecure); setUpstream(c.upstream);
+      setPort(c.port); setMitm(c.mitm); setInsecure(c.insecure);
+      setUpstream(c.upstream); setUseDefaultCa(c.use_default_ca);
     }).catch(() => {});
     captureStatus().then(setRunning).catch(() => {});
     searchFlows("", 2000).then((fs) => {
@@ -80,8 +82,8 @@ export default function App() {
   }, [flows, filter]);
 
   // 用当前设置启动/重启代理（start_capture 会先中止旧任务再启新的）。
-  const beginCapture = (m = mitm, ins = insecure, up = upstream) =>
-    startCapture(port, m, ins, up.trim() || null);
+  const beginCapture = (m = mitm, ins = insecure, up = upstream, dca = useDefaultCa) =>
+    startCapture(port, m, ins, up.trim() || null, dca);
 
   async function toggleCapture() {
     try {
@@ -99,13 +101,13 @@ export default function App() {
   }
 
   // 把设置持久化到运行目录的配置文件。
-  const persist = (cfg: { port: number; mitm: boolean; insecure: boolean; upstream: string }) =>
+  const persist = (cfg: { port: number; mitm: boolean; insecure: boolean; upstream: string; use_default_ca: boolean }) =>
     setConfig(cfg).catch(() => {});
 
-  // 以下开关随时可改；抓包中改 MITM/上游代理会重启代理即时生效，并持久化。
+  // 以下开关随时可改；抓包中改 MITM/上游代理/证书会重启代理即时生效，并持久化。
   async function changeMitm(v: boolean) {
     setMitm(v);
-    persist({ port, mitm: v, insecure, upstream });
+    persist({ port, mitm: v, insecure, upstream, use_default_ca: useDefaultCa });
     if (running != null) {
       try { await beginCapture(v, insecure, upstream); setBanner(v ? "已开启 HTTPS 解密（代理已重启）" : "已关闭 MITM（代理已重启）"); }
       catch (e) { setBanner(String(e)); }
@@ -113,13 +115,22 @@ export default function App() {
   }
   async function changeInsecure(v: boolean) {
     setInsecure(v);
-    persist({ port, mitm, insecure: v, upstream });
+    persist({ port, mitm, insecure: v, upstream, use_default_ca: useDefaultCa });
     if (running != null) { try { await beginCapture(mitm, v, upstream); } catch (e) { setBanner(String(e)); } }
+  }
+  // 切换「默认共享 CA / 本机生成 CA」。
+  async function changeDefaultCa(v: boolean) {
+    setUseDefaultCa(v);
+    persist({ port, mitm, insecure, upstream, use_default_ca: v });
+    if (running != null) {
+      try { await beginCapture(mitm, insecure, upstream, v); setBanner(v ? "已切到默认共享证书（代理已重启）" : "已切到本机生成证书（代理已重启）"); }
+      catch (e) { setBanner(String(e)); }
+    }
   }
   // 从设置对话框保存：更新端口/上游并持久化，抓包中则重启生效。
   async function applyUpstream(up: string) {
     setUpstream(up);
-    persist({ port, mitm, insecure, upstream: up });
+    persist({ port, mitm, insecure, upstream: up, use_default_ca: useDefaultCa });
     if (running != null) {
       try { await beginCapture(mitm, insecure, up); setBanner("设置已应用（代理已重启）"); }
       catch (e) { setBanner(String(e)); }
@@ -163,7 +174,7 @@ export default function App() {
       .catch((e) => setBanner(String(e)));
   }
   function replayCurrent() { if (detail) { setSeed(seedFromDetail(detail)); setMode("compose"); } }
-  function installCert() { installCa().then((m) => setBanner(m)).catch((e) => setBanner("安装证书失败: " + e)); }
+  function installCert() { installCa(useDefaultCa).then((m) => setBanner(m)).catch((e) => setBanner("安装证书失败: " + e)); }
   function doExportHar() { exportHar(filter || undefined).then((p) => setBanner("HAR → " + p)).catch((e) => setBanner(String(e))); }
 
   // --- 右键菜单动作 ---
@@ -263,6 +274,7 @@ export default function App() {
           port={port} setPort={setPort}
           mitm={mitm} onMitm={changeMitm} insecure={insecure} onInsecure={changeInsecure}
           upstream={upstream} onSave={applyUpstream}
+          useDefaultCa={useDefaultCa} onDefaultCa={changeDefaultCa}
           onInstallCa={installCert}
         />
       )}

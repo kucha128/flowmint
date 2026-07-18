@@ -92,7 +92,11 @@ public sealed class FlowMint : System.IDisposable
         return this;
     }
 
-    public FlowMint SetDataDir(string dir) { fm_set_data_dir(_ctx, dir); return this; }
+    // 设置 MITM CA（内存 PEM，不落地）；传 null 则用软件内置默认 CA。
+    public FlowMint SetCa(string? certPem, string? keyPem) { fm_set_ca(_ctx, certPem, keyPem); return this; }
+
+    // 安装当前生效 CA 到当前用户根存储（Windows）。
+    public bool InstallCa() => fm_install_ca(_ctx);
 
     public FlowMint OnHttp(System.Action<HttpEvent> handler)
     {
@@ -165,7 +169,8 @@ public sealed class FlowMint : System.IDisposable
     [DllImport(L, CallingConvention = CallingConvention.Cdecl)] private static extern void fm_context_free(nint ctx);
     [DllImport(L, CallingConvention = CallingConvention.Cdecl)] private static extern void fm_bind_port(nint ctx, ushort port);
     [DllImport(L, CallingConvention = CallingConvention.Cdecl)] private static extern void fm_set_mitm(nint ctx, [MarshalAs(UnmanagedType.I1)] bool mitm, [MarshalAs(UnmanagedType.I1)] bool insecure);
-    [DllImport(L, CallingConvention = CallingConvention.Cdecl)] private static extern void fm_set_data_dir(nint ctx, [MarshalAs(UnmanagedType.LPUTF8Str)] string dir);
+    [DllImport(L, CallingConvention = CallingConvention.Cdecl)] private static extern void fm_set_ca(nint ctx, [MarshalAs(UnmanagedType.LPUTF8Str)] string? certPem, [MarshalAs(UnmanagedType.LPUTF8Str)] string? keyPem);
+    [DllImport(L, CallingConvention = CallingConvention.Cdecl)][return: MarshalAs(UnmanagedType.I1)] private static extern bool fm_install_ca(nint ctx);
     [DllImport(L, CallingConvention = CallingConvention.Cdecl)] private static extern void fm_set_http_callback(nint ctx, HttpCallback cb, nint user);
     [DllImport(L, CallingConvention = CallingConvention.Cdecl)][return: MarshalAs(UnmanagedType.I1)] private static extern bool fm_start(nint ctx);
     [DllImport(L, CallingConvention = CallingConvention.Cdecl)] private static extern void fm_stop(nint ctx);

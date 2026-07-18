@@ -29,6 +29,7 @@ async fn main() -> Result<()> {
             mitm,
             insecure_upstream,
             upstream,
+            default_ca,
         }) => {
             commands::capture::start(
                 &engine,
@@ -38,6 +39,7 @@ async fn main() -> Result<()> {
                 mitm,
                 insecure_upstream,
                 upstream,
+                default_ca,
             )
             .await?
         }

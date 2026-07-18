@@ -28,9 +28,12 @@ DLL 命令声明（命令名, 库文件名 flowmint.dll, 对应 C 导出名）
     .参数 ctx, 整数型
     .参数 mitm, 逻辑型
     .参数 insecure_upstream, 逻辑型
-.DLL命令 fm_set_data_dir, , "flowmint.dll", "fm_set_data_dir"
+.DLL命令 fm_set_ca, , "flowmint.dll", "fm_set_ca"   ' 设 MITM 证书(内存PEM,不落地);传0用内置默认CA
     .参数 ctx, 整数型
-    .参数 dir, 文本型            ' UTF-8 建议先转字节集
+    .参数 cert_pem, 文本型
+    .参数 key_pem, 文本型
+.DLL命令 fm_install_ca, 逻辑型, "flowmint.dll", "fm_install_ca"  ' 安装当前CA到用户根存储(Windows)
+    .参数 ctx, 整数型
 .DLL命令 fm_set_http_callback, , "flowmint.dll", "fm_set_http_callback"
     .参数 ctx, 整数型
     .参数 cb, 子程序指针         ' 取子程序指针(观察回调)

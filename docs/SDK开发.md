@@ -27,12 +27,13 @@ proxy-http + tls + model   （抓包引擎）
 | `fm_context_new` / `fm_context_free` | 创建/释放实例 |
 | `fm_bind_port(ctx, port)` | 监听端口（loopback） |
 | `fm_set_mitm(ctx, mitm, insecure_upstream)` | 开启 HTTPS 拦截 |
-| `fm_set_data_dir(ctx, dir)` | CA/数据目录 |
+| `fm_set_ca(ctx, cert_pem, key_pem)` | 设 MITM 证书（**内存 PEM，不落地**）；传 NULL/空用内置默认 CA |
+| `fm_install_ca(ctx)` | 安装当前 CA 到用户根存储（Windows） |
 | `fm_set_http_callback(ctx, cb, user)` | 注册 HTTP **观察**回调（只读） |
 | `fm_set_intercept_callback(ctx, cb, user)` | 注册**拦截改包**回调（在途可改写） |
 | `fm_start(ctx)` / `fm_stop(ctx)` | 启停抓包 |
 | `fm_last_error(ctx)` | 取错误信息 |
-| `fm_export_ca(ctx, path)` | 导出 MITM CA |
+| `fm_export_ca(ctx, path)` | 导出当前生效的 CA(PEM) |
 | `fm_http_event_type/method/url/host/status/body(ev)` | 观察回调内读取事件字段 |
 | `fm_intercept_is_response/method/url/status/body(msg)` | 拦截回调内读取消息字段 |
 | `fm_intercept_set_body/status/header(msg, …)` | 拦截回调内改写 Body/状态码/头 |
@@ -137,6 +138,18 @@ fm_set_intercept_callback(ctx, on_intercept, nullptr);
 ```
 
 C# 用 `OnIntercept(m => { …; return InterceptAction.Modify; })`，Go 用 `OnIntercept(func(m *Intercept) int32 { …; return Modify })`，Java 用 `onIntercept(m -> { …; return MODIFY; })`，易语言见声明文件——语义一致。
+
+## MITM 证书
+
+- `fm_set_mitm(ctx, true, ...)` 开启 HTTPS 解密。证书三选一：
+  1. **不设**（`fm_set_ca` 传 NULL/不调用）→ 用**软件内置默认共享 CA**。省事，但见下方警告。
+  2. **传自己的证书**：`fm_set_ca(ctx, cert_pem, key_pem)`，**内存 PEM、不落地**。
+  3. 需要时 `fm_install_ca(ctx)` 把当前 CA 装进当前用户根存储（Windows），或 `fm_export_ca` 导出自行安装。
+- 不开 MITM 只抓明文 HTTP / 隧道元数据，不涉及证书。改包对明文 HTTP 也不需要证书。
+
+> ⚠️ **内置默认 CA 的私钥是公开的**（随仓库发布）。任何拿到本项目的人都能用它伪造任意站点证书；
+> 凡是安装/信任了它的机器都可能被他人解密 HTTPS。**只用于图省事的临时调试，绝不要在正式/敏感机器上装**。
+> 生产/敏感场景请用 `fm_set_ca` 传你自己私有的 CA。
 
 ## 易语言绑定
 

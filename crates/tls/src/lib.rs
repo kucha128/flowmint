@@ -50,6 +50,11 @@ pub struct CertAuthority {
     cache: Mutex<HashMap<String, Arc<CertifiedKey>>>,
 }
 
+// 内置默认共享 CA（公开、私钥公开——见 bundled_default 的安全警告）。
+// 由 `cargo run -p flowmint-tls --example gen_default_ca` 生成后提交。
+const DEFAULT_CA_PEM: &str = include_str!("../default-ca/ca.pem");
+const DEFAULT_CA_KEY_PEM: &str = include_str!("../default-ca/ca.key.pem");
+
 impl CertAuthority {
     /// Load the CA from `dir` (ca.pem + ca.key.pem), creating a fresh one on
     /// first use.
@@ -88,7 +93,34 @@ impl CertAuthority {
         }
     }
 
-    fn generate_ca() -> Result<(rcgen::Certificate, KeyPair)> {
+    /// 从内存 PEM 构造 CA（不落盘）：SDK「证书不落地」与内置默认 CA 都走这里。
+    pub fn from_pem(cert_pem: &str, key_pem: &str) -> Result<Self> {
+        let ca_key = KeyPair::from_pem(key_pem)?;
+        let params = CertificateParams::from_ca_cert_pem(cert_pem)?;
+        let ca_cert = params.self_signed(&ca_key)?;
+        Ok(Self {
+            ca_cert,
+            ca_key,
+            ca_pem: cert_pem.to_string(),
+            cache: Mutex::new(HashMap::new()),
+        })
+    }
+
+    /// 软件内置的**默认共享 CA**（编译进二进制）。⚠️ 私钥是公开的——任何拿到本项目的人
+    /// 都能用它伪造任意站点证书。仅用于图省事的临时调试；正式/敏感环境请用本机生成的 CA。
+    pub fn bundled_default() -> Result<Self> {
+        Self::from_pem(DEFAULT_CA_PEM, DEFAULT_CA_KEY_PEM)
+    }
+
+    /// 生成一张新 CA 的 (cert_pem, key_pem)（供生成内置默认 CA 的工具用）。
+    pub fn generate_pem(common_name: &str) -> Result<(String, String)> {
+        let params = Self::ca_params(common_name)?;
+        let key = KeyPair::generate()?;
+        let cert = params.self_signed(&key)?;
+        Ok((cert.pem(), key.serialize_pem()))
+    }
+
+    fn ca_params(common_name: &str) -> Result<CertificateParams> {
         let mut params = CertificateParams::new(Vec::<String>::new())?;
         params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
         params.key_usages = vec![
@@ -101,10 +133,14 @@ impl CertAuthority {
         params.not_before = now - Duration::days(1);
         params.not_after = now + Duration::days(3650); // ~10 年
         let mut dn = DistinguishedName::new();
-        dn.push(DnType::CommonName, "FlowMint Local CA");
+        dn.push(DnType::CommonName, common_name);
         dn.push(DnType::OrganizationName, "FlowMint");
         params.distinguished_name = dn;
+        Ok(params)
+    }
 
+    fn generate_ca() -> Result<(rcgen::Certificate, KeyPair)> {
+        let params = Self::ca_params("FlowMint Local CA")?;
         let key = KeyPair::generate()?;
         let cert = params.self_signed(&key)?;
         Ok((cert, key))
@@ -303,5 +339,23 @@ mod tests {
         let ca2 = CertAuthority::load_or_create(dir.path()).unwrap();
         assert_eq!(ca.ca_pem(), ca2.ca_pem());
         let _ = server_config_for_host(Arc::new(ca2), "example.com").unwrap();
+    }
+
+    #[test]
+    fn bundled_default_loads_and_mints() {
+        // 内置默认共享 CA：能从提交的 PEM 加载并签发叶子证书。
+        let ca = CertAuthority::bundled_default().unwrap();
+        assert!(ca.ca_pem().contains("BEGIN CERTIFICATE"));
+        let leaf = ca.leaf_for("example.com").unwrap();
+        assert!(!leaf.cert.is_empty());
+        let _ = server_config_for_host(Arc::new(ca), "example.com").unwrap();
+    }
+
+    #[test]
+    fn from_pem_roundtrips() {
+        let (cert, key) = CertAuthority::generate_pem("Test CA").unwrap();
+        let ca = CertAuthority::from_pem(&cert, &key).unwrap();
+        assert_eq!(ca.ca_pem(), cert);
+        assert!(ca.leaf_for("h.example").is_ok());
     }
 }

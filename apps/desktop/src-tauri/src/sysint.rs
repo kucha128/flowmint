@@ -1,7 +1,6 @@
 //! Windows 桌面集成：一键设置/还原系统代理、安装 CA 证书。
 
 use std::ffi::c_void;
-use std::path::Path;
 use std::process::Command;
 use std::ptr;
 
@@ -69,13 +68,24 @@ pub fn restore_proxy(saved: &SavedProxy) -> std::io::Result<()> {
     Ok(())
 }
 
-/// 把 CA 安装到「当前用户 — 受信任的根证书颁发机构」。返回提示信息。
-pub fn install_ca(pem_path: &Path) -> Result<String, String> {
+/// 把 CA（PEM 内容）安装到「当前用户 — 受信任的根证书颁发机构」。返回提示信息。
+/// PEM 先写到临时文件再交给 certutil，装完删除——支持内置默认 CA（无独立文件）。
+pub fn install_ca_pem(pem: &str) -> Result<String, String> {
+    use std::io::Write;
+    let mut path = std::env::temp_dir();
+    path.push(format!("flowmint-ca-{}.pem", std::process::id()));
+    {
+        let mut f = std::fs::File::create(&path).map_err(|e| format!("写临时证书失败: {e}"))?;
+        f.write_all(pem.as_bytes())
+            .map_err(|e| format!("写临时证书失败: {e}"))?;
+    }
     let out = Command::new("certutil")
         .args(["-user", "-addstore", "-f", "Root"])
-        .arg(pem_path)
+        .arg(&path)
         .output()
-        .map_err(|e| format!("执行 certutil 失败: {e}"))?;
+        .map_err(|e| format!("执行 certutil 失败: {e}"));
+    let _ = std::fs::remove_file(&path);
+    let out = out?;
     if out.status.success() {
         Ok("证书已安装到「当前用户 - 受信任的根证书颁发机构」".to_string())
     } else {

@@ -46,7 +46,7 @@ public final class FlowMint implements AutoCloseable {
     private final Arena arena = Arena.ofShared();
     private final SymbolLookup lib;
     private final MemorySegment ctx;
-    private final MethodHandle hFree, hBindPort, hSetMitm, hSetDataDir, hSetCb, hStart, hStop,
+    private final MethodHandle hFree, hBindPort, hSetMitm, hSetCa, hInstallCa, hSetCb, hStart, hStop,
             hLastErr, hVersion, hExportCa, hEvType, hEvMethod, hEvUrl, hEvHost, hEvStatus, hEvBody;
     private final MethodHandle hSetICb, hIResp, hIMethod, hIUrl, hIStatus, hIBody,
             hISetBody, hISetStatus, hISetHeader;
@@ -98,7 +98,8 @@ public final class FlowMint implements AutoCloseable {
         hFree = dc("fm_context_free", FunctionDescriptor.ofVoid(ValueLayout.ADDRESS));
         hBindPort = dc("fm_bind_port", FunctionDescriptor.ofVoid(ValueLayout.ADDRESS, U16));
         hSetMitm = dc("fm_set_mitm", FunctionDescriptor.ofVoid(ValueLayout.ADDRESS, BOOL, BOOL));
-        hSetDataDir = dc("fm_set_data_dir", FunctionDescriptor.ofVoid(ValueLayout.ADDRESS, ValueLayout.ADDRESS));
+        hSetCa = dc("fm_set_ca", FunctionDescriptor.ofVoid(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
+        hInstallCa = dc("fm_install_ca", FunctionDescriptor.of(BOOL, ValueLayout.ADDRESS));
         hSetCb = dc("fm_set_http_callback", FunctionDescriptor.ofVoid(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
         hStart = dc("fm_start", FunctionDescriptor.of(BOOL, ValueLayout.ADDRESS));
         hStop = dc("fm_stop", FunctionDescriptor.ofVoid(ValueLayout.ADDRESS));
@@ -145,10 +146,17 @@ public final class FlowMint implements AutoCloseable {
         return this;
     }
 
-    public FlowMint setDataDir(String dir) throws Throwable {
-        MemorySegment s = arena.allocateUtf8String(dir);
-        hSetDataDir.invoke(ctx, s);
+    /** 设置 MITM CA（内存 PEM，不落地）；传 null 则用软件内置默认 CA。 */
+    public FlowMint setCa(String certPem, String keyPem) throws Throwable {
+        MemorySegment cert = certPem == null ? MemorySegment.NULL : arena.allocateUtf8String(certPem);
+        MemorySegment key = keyPem == null ? MemorySegment.NULL : arena.allocateUtf8String(keyPem);
+        hSetCa.invoke(ctx, cert, key);
         return this;
+    }
+
+    /** 安装当前生效 CA 到当前用户根存储（Windows）。 */
+    public boolean installCa() throws Throwable {
+        return (boolean) hInstallCa.invoke(ctx);
     }
 
     public FlowMint onHttp(Consumer<HttpEvent> h) throws Throwable {

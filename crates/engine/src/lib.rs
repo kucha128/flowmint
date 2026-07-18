@@ -125,6 +125,21 @@ impl Engine {
         Ok((self.ca_dir().join("ca.pem"), ca.ca_pem().to_string()))
     }
 
+    /// 当前生效的 CA：`use_default=true` 用内置默认共享 CA（⚠️ 公开私钥、仅测试），
+    /// 否则用本机生成的 CA。抓包/安装/下载证书都以它为准。
+    pub fn active_ca(&self, use_default: bool) -> Result<Arc<flowmint_tls::CertAuthority>> {
+        Ok(Arc::new(if use_default {
+            flowmint_tls::CertAuthority::bundled_default()?
+        } else {
+            flowmint_tls::CertAuthority::load_or_create(self.ca_dir())?
+        }))
+    }
+
+    /// 当前生效 CA 的 PEM（供安装/下载）。
+    pub fn active_ca_pem(&self, use_default: bool) -> Result<String> {
+        Ok(self.active_ca(use_default)?.ca_pem().to_string())
+    }
+
     /// Start an explicit HTTP capture bound to `bind` (should be loopback).
     /// When `mitm` is true, HTTPS is intercepted using the profile CA (design
     /// §7.2). Runs until the returned future is dropped/cancelled.
@@ -135,6 +150,7 @@ impl Engine {
         mitm: bool,
         insecure_upstream: bool,
         upstream_proxy: Option<String>,
+        use_default_ca: bool,
     ) -> Result<()> {
         let clock = Clock::start_now();
         let capture_id = flowmint_model::CaptureId::new();
@@ -146,7 +162,7 @@ impl Engine {
         )?;
 
         // 无论是否 MITM 都备好 CA（生成很廉价），落地页要用它下载证书。
-        let ca = Arc::new(flowmint_tls::CertAuthority::load_or_create(self.ca_dir())?);
+        let ca = self.active_ca(use_default_ca)?;
         let ca_pem: Arc<str> = Arc::from(ca.ca_pem());
         let ca_der: Arc<[u8]> = Arc::from(ca.ca_der());
 

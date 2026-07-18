@@ -29,6 +29,7 @@ async fn start_capture(
     mitm: bool,
     insecure: bool,
     upstream: Option<String>,
+    use_default_ca: bool,
 ) -> Result<(), String> {
     if let Some(h) = state.task.lock().unwrap().take() {
         h.abort();
@@ -38,7 +39,10 @@ async fn start_capture(
     // 空串视为不设上游代理。
     let upstream = upstream.filter(|s| !s.trim().is_empty());
     let handle = async_runtime::spawn(async move {
-        if let Err(e) = engine.run_http_capture(bind, None, mitm, insecure, upstream).await {
+        if let Err(e) = engine
+            .run_http_capture(bind, None, mitm, insecure, upstream, use_default_ca)
+            .await
+        {
             eprintln!("capture stopped: {e}");
         }
     });
@@ -94,11 +98,15 @@ fn export_har(state: State<'_, AppState>, host: Option<String>) -> Result<String
     Ok(format!("{} ({n} flows)", out.display()))
 }
 
-/// 安装 CA 到当前用户根存储（HTTPS 解密所需）。
+/// 安装当前生效的 CA 到当前用户根存储（HTTPS 解密所需）。
+/// `use_default_ca=true` 装内置默认共享 CA，否则装本机生成的 CA。
 #[tauri::command]
-fn install_ca(state: State<'_, AppState>) -> Result<String, String> {
-    let (path, _pem) = state.engine.ensure_ca().map_err(|e| e.to_string())?;
-    sysint::install_ca(&path)
+fn install_ca(state: State<'_, AppState>, use_default_ca: bool) -> Result<String, String> {
+    let pem = state
+        .engine
+        .active_ca_pem(use_default_ca)
+        .map_err(|e| e.to_string())?;
+    sysint::install_ca_pem(&pem)
 }
 
 /// 把系统代理设为 127.0.0.1:port（先备份原设置以便还原）。
@@ -182,11 +190,19 @@ struct AppConfig {
     mitm: bool,
     insecure: bool,
     upstream: String,
+    #[serde(default)]
+    use_default_ca: bool,
 }
 
 impl Default for AppConfig {
     fn default() -> Self {
-        Self { port: 8888, mitm: false, insecure: false, upstream: String::new() }
+        Self {
+            port: 8888,
+            mitm: false,
+            insecure: false,
+            upstream: String::new(),
+            use_default_ca: false,
+        }
     }
 }
 
