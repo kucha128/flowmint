@@ -11,7 +11,7 @@ use std::sync::Mutex;
 use flowmint_engine::Engine;
 use flowmint_storage::SearchFilter;
 use flowmint_sysint as sysint;
-use tauri::{async_runtime, Emitter, State};
+use tauri::{async_runtime, Emitter, Manager, State};
 
 struct AppState {
     engine: Engine,
@@ -242,6 +242,18 @@ fn main() {
     let stream_engine = engine.clone();
 
     tauri::Builder::default()
+        // 禁止多开：再次启动时不新开进程，而是把已运行的窗口拉到前台。
+        // 该插件必须最先注册。
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            let win = app
+                .get_webview_window("main")
+                .or_else(|| app.webview_windows().into_values().next());
+            if let Some(w) = win {
+                let _ = w.show();
+                let _ = w.unminimize();
+                let _ = w.set_focus();
+            }
+        }))
         .manage(AppState {
             engine,
             task: Mutex::new(None),
