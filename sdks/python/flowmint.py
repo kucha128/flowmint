@@ -61,8 +61,12 @@ def _bind(dll_path: str) -> C.CDLL:
     lib.fm_bind_port.argtypes = [p, C.c_uint16]
     lib.fm_set_mitm.argtypes = [p, C.c_bool, C.c_bool]
     lib.fm_set_ca.argtypes = [p, C.c_char_p, C.c_char_p]
-    lib.fm_install_ca.argtypes = [p]
-    lib.fm_install_ca.restype = C.c_bool
+    lib.fm_set_upstream_proxy.argtypes = [p, C.c_char_p]
+    for g in ("fm_install_ca", "fm_is_ca_installed", "fm_clear_system_proxy"):
+        getattr(lib, g).argtypes = [p]
+        getattr(lib, g).restype = C.c_bool
+    lib.fm_set_system_proxy.argtypes = [p, C.c_uint16]
+    lib.fm_set_system_proxy.restype = C.c_bool
     lib.fm_set_http_callback.argtypes = [p, _CB, p]
     lib.fm_start.argtypes = [p]
     lib.fm_start.restype = C.c_bool
@@ -181,6 +185,23 @@ class FlowMint:
     def install_ca(self) -> bool:
         """把当前生效的 CA 安装到当前用户根存储（Windows）。"""
         return bool(self._lib.fm_install_ca(self._ctx))
+
+    def is_ca_installed(self) -> bool:
+        """当前生效的 CA 是否已装进用户根存储（Windows）。"""
+        return bool(self._lib.fm_is_ca_installed(self._ctx))
+
+    def set_upstream_proxy(self, host_port: Optional[str]) -> "FlowMint":
+        """设置上游代理 host:port（出站再转发给它）；传 None 直连。"""
+        self._lib.fm_set_upstream_proxy(self._ctx, host_port.encode() if host_port else None)
+        return self
+
+    def set_system_proxy(self, port: int) -> bool:
+        """把系统代理指向 127.0.0.1:port（Windows）。"""
+        return bool(self._lib.fm_set_system_proxy(self._ctx, port))
+
+    def clear_system_proxy(self) -> bool:
+        """关闭系统代理（Windows）。"""
+        return bool(self._lib.fm_clear_system_proxy(self._ctx))
 
     def on_http(self, callback: Callable[[HttpEvent], None]) -> "FlowMint":
         lib = self._lib

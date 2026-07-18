@@ -29,6 +29,7 @@ interface SettingsProps {
   upstream: string;
   onSave: (upstream: string) => void; // 保存端口/上游/MITM 到配置并（抓包中）重启生效
   useDefaultCa: boolean;
+  caInstalled: boolean;
   onUseDefault: () => void;
   onCreateNew: () => void;
 }
@@ -88,14 +89,15 @@ export function SettingsDialog(p: SettingsProps) {
               </label>
             )}
             <div className="field">
-              <span>证书</span>
+              <span>证书 · {p.useDefaultCa ? "默认证书" : "本机证书"} · {p.caInstalled
+                ? <b style={{ color: "var(--ok)" }}>已安装</b>
+                : <b style={{ color: "var(--warn)" }}>未安装</b>}</span>
               <div style={{ display: "flex", gap: 8 }}>
                 <button className={p.useDefaultCa ? "primary" : ""} onClick={p.onUseDefault}>使用默认证书</button>
                 <button className={!p.useDefaultCa ? "primary" : ""} onClick={p.onCreateNew}>创建新证书</button>
               </div>
               <em className="muted">
-                点按钮即切换并安装到本机。当前：{p.useDefaultCa ? "默认证书" : "本机证书"}。
-                其它设备可在浏览器打开 <b>http://&lt;本机IP&gt;:{p.port}/</b> 下载安装。
+                点按钮即切换并安装到本机。其它设备可在浏览器打开 <b>http://&lt;本机IP&gt;:{p.port}/</b> 下载安装。
               </em>
             </div>
           </>

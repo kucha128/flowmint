@@ -7,6 +7,8 @@ interface Props {
   upstream: string;
   flowCount: number;
   banner: string;
+  caInstalled: boolean;
+  onCert: () => void;
 }
 
 export function StatusBar(p: Props) {
@@ -14,9 +16,14 @@ export function StatusBar(p: Props) {
     <div className="statusbar">
       <button className={"sb-toggle" + (p.sysProxy ? " on" : "")}
         onClick={() => p.onToggleSysProxy(!p.sysProxy)}
-        title="把 Windows 系统代理指向 FlowMint（再次点击还原）">
+        title="把 Windows 系统代理指向 FlowMint（再次点击关闭）">
         <span className={"dot " + (p.sysProxy ? "on" : "off")} />
         系统代理：{p.sysProxy ? "开" : "关"}
+      </button>
+
+      <button className="sb-toggle" onClick={p.onCert} title="证书设置">
+        <span className={"dot " + (p.caInstalled ? "on" : "off")} />
+        证书：{p.caInstalled ? "已安装" : "未安装"}
       </button>
 
       <span className="sb-msg" title={p.banner}>{p.banner}</span>

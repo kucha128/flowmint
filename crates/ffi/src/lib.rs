@@ -418,6 +418,8 @@ pub struct FmContext {
     insecure_upstream: bool,
     /// MITM CA：`Some((cert_pem, key_pem))` 用调用方设的证书（不落地）；`None` 用内置默认 CA。
     ca: Option<(String, String)>,
+    /// 上游代理 host:port（出站再转发给它，形成代理链）；`None` 直连。
+    upstream: Option<String>,
     target: CallbackTarget,
     intercept: InterceptTarget,
     runtime: Option<Runtime>,
@@ -446,6 +448,7 @@ pub extern "C" fn fm_context_new() -> *mut FmContext {
         mitm: false,
         insecure_upstream: false,
         ca: None,
+        upstream: None,
         target: CallbackTarget {
             cb: None,
             user: ptr::null_mut(),
@@ -508,6 +511,18 @@ pub unsafe extern "C" fn fm_set_ca(
         (Some(cert), Some(key)) => Some((cert.to_string(), key.to_string())),
         _ => None, // 缺任一 → 用默认 CA
     };
+}
+
+/// 设置上游代理 `host:port`（出站再转发给它）；传 NULL/空则直连。fm_start 前调用。
+/// # Safety: `host_port` 为有效的以 NUL 结尾的 UTF-8 字符串或 NULL。
+#[no_mangle]
+pub unsafe extern "C" fn fm_set_upstream_proxy(ctx: *mut FmContext, host_port: *const c_char) {
+    let Some(c) = ctx.as_mut() else { return };
+    c.upstream = (!host_port.is_null())
+        .then(|| CStr::from_ptr(host_port).to_str().ok())
+        .flatten()
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
 }
 
 /// 注册 HTTP 回调（传 NULL 清除）。必须在 `fm_start` 之前调用。
@@ -577,7 +592,7 @@ pub unsafe extern "C" fn fm_start(ctx: *mut FmContext) -> bool {
         clock: Clock::start_now(),
         mitm,
         hook,
-        upstream_proxy: None,
+        upstream_proxy: c.upstream.clone().map(Arc::from),
         proxy_port: 0,
         ca_pem: None,
         ca_der: None,
@@ -631,7 +646,6 @@ pub unsafe extern "C" fn fm_export_ca(ctx: *mut FmContext, out_path: *const c_ch
 }
 
 /// 把当前生效的 CA 安装到「当前用户」的受信任根存储（Windows；成功返回 true）。
-/// 非 Windows 平台返回 false 并设错误。
 #[no_mangle]
 pub unsafe extern "C" fn fm_install_ca(ctx: *mut FmContext) -> bool {
     let Some(c) = ctx.as_mut() else { return false };
@@ -642,7 +656,7 @@ pub unsafe extern "C" fn fm_install_ca(ctx: *mut FmContext) -> bool {
             return false;
         }
     };
-    match install_ca_pem(&pem) {
+    match flowmint_sysint::install_ca_pem(&pem) {
         Ok(()) => true,
         Err(e) => {
             c.set_error(e);
@@ -651,35 +665,42 @@ pub unsafe extern "C" fn fm_install_ca(ctx: *mut FmContext) -> bool {
     }
 }
 
-/// 把 CA PEM 装进当前用户根存储（Windows：写临时文件 + certutil）。
-#[cfg(windows)]
-fn install_ca_pem(pem: &str) -> Result<(), String> {
-    use std::io::Write;
-    let mut path = std::env::temp_dir();
-    path.push(format!("flowmint-ca-{}.pem", std::process::id()));
-    {
-        let mut f = std::fs::File::create(&path).map_err(|e| format!("写临时证书失败: {e}"))?;
-        f.write_all(pem.as_bytes())
-            .map_err(|e| format!("写临时证书失败: {e}"))?;
-    }
-    let out = std::process::Command::new("certutil")
-        .args(["-user", "-addstore", "-f", "Root"])
-        .arg(&path)
-        .output();
-    let _ = std::fs::remove_file(&path);
-    match out {
-        Ok(o) if o.status.success() => Ok(()),
-        Ok(o) => Err(format!(
-            "certutil 失败: {}",
-            String::from_utf8_lossy(&o.stdout)
-        )),
-        Err(e) => Err(format!("执行 certutil 失败: {e}")),
+/// 当前生效的 CA 是否已装进用户根存储（Windows）。
+#[no_mangle]
+pub unsafe extern "C" fn fm_is_ca_installed(ctx: *mut FmContext) -> bool {
+    let Some(c) = ctx.as_mut() else { return false };
+    match c.active_ca() {
+        Ok(ca) => flowmint_sysint::is_ca_installed(&ca.ca_der()),
+        Err(_) => false,
     }
 }
 
-#[cfg(not(windows))]
-fn install_ca_pem(_pem: &str) -> Result<(), String> {
-    Err("fm_install_ca 仅支持 Windows".to_string())
+/// 把系统代理设为 127.0.0.1:port 并开启（Windows；成功返回 true）。
+#[no_mangle]
+pub unsafe extern "C" fn fm_set_system_proxy(ctx: *mut FmContext, port: u16) -> bool {
+    match flowmint_sysint::set_system_proxy(port) {
+        Ok(()) => true,
+        Err(e) => {
+            if let Some(c) = ctx.as_mut() {
+                c.set_error(e);
+            }
+            false
+        }
+    }
+}
+
+/// 关闭系统代理（Windows；成功返回 true）。
+#[no_mangle]
+pub unsafe extern "C" fn fm_clear_system_proxy(ctx: *mut FmContext) -> bool {
+    match flowmint_sysint::disable_system_proxy() {
+        Ok(()) => true,
+        Err(e) => {
+            if let Some(c) = ctx.as_mut() {
+                c.set_error(e);
+            }
+            false
+        }
+    }
 }
 
 /// SDK 版本（以 NUL 结尾）。

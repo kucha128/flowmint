@@ -22,10 +22,10 @@ tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
-winreg = "0.52"
 flowmint-engine = { path = "../../../crates/engine" }
 flowmint-model = { path = "../../../crates/model" }
 flowmint-storage = { path = "../../../crates/storage" }
+flowmint-sysint = { path = "../../../crates/sysint" }
 
 [profile.release]
 lto = "thin"

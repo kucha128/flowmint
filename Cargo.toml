@@ -6,6 +6,7 @@ members = [
   "crates/tls",
   "crates/proxy-http",
   "crates/rules",
+  "crates/sysint",
   "crates/engine",
   "crates/api",
   "crates/mcp",
@@ -46,6 +47,10 @@ clap = { version = "4", features = ["derive"] }
 # redaction
 regex = "1"
 
+# 系统集成（Windows：系统代理 + 证书安装/检查）
+winreg = "0.52"
+sha1 = "0.10"
+
 # 响应体解压（Content-Encoding: gzip/deflate/br/zstd）
 flate2 = "1"
 brotli = "7"
@@ -64,6 +69,7 @@ flowmint-storage = { path = "crates/storage" }
 flowmint-tls = { path = "crates/tls" }
 flowmint-proxy-http = { path = "crates/proxy-http" }
 flowmint-rules = { path = "crates/rules" }
+flowmint-sysint = { path = "crates/sysint" }
 flowmint-engine = { path = "crates/engine" }
 flowmint-api = { path = "crates/api" }
 flowmint-mcp = { path = "crates/mcp" }

@@ -28,7 +28,10 @@ proxy-http + tls + model   （抓包引擎）
 | `fm_bind_port(ctx, port)` | 监听端口（loopback） |
 | `fm_set_mitm(ctx, mitm, insecure_upstream)` | 开启 HTTPS 拦截 |
 | `fm_set_ca(ctx, cert_pem, key_pem)` | 设 MITM 证书（**内存 PEM，不落地**）；传 NULL/空用内置默认 CA |
-| `fm_install_ca(ctx)` | 安装当前 CA 到用户根存储（Windows） |
+| `fm_set_upstream_proxy(ctx, host_port)` | 上游代理链（出站再转发）；传 NULL/空直连 |
+| `fm_install_ca(ctx)` → bool | 安装当前 CA 到用户根存储（Windows） |
+| `fm_is_ca_installed(ctx)` → bool | 当前 CA 是否已装（Windows） |
+| `fm_set_system_proxy(ctx, port)` / `fm_clear_system_proxy(ctx)` → bool | 设置/关闭系统代理（Windows） |
 | `fm_set_http_callback(ctx, cb, user)` | 注册 HTTP **观察**回调（只读） |
 | `fm_set_intercept_callback(ctx, cb, user)` | 注册**拦截改包**回调（在途可改写） |
 | `fm_start(ctx)` / `fm_stop(ctx)` | 启停抓包 |

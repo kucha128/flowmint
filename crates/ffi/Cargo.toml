@@ -14,5 +14,6 @@ crate-type = ["cdylib", "staticlib"]
 flowmint-model.workspace = true
 flowmint-tls.workspace = true
 flowmint-proxy-http.workspace = true
+flowmint-sysint.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "net"] }

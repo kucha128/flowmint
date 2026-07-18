@@ -42,13 +42,18 @@ void        fm_bind_port(FmContext* ctx, uint16_t port);
 void        fm_set_mitm(FmContext* ctx, bool mitm, bool insecure_upstream);
 /* 设置 MITM CA（内存 PEM，不落地）；传 NULL/空则用软件内置默认 CA。fm_start 前调用。 */
 void        fm_set_ca(FmContext* ctx, const char* cert_pem, const char* key_pem);
+/* 设置上游代理 host:port（出站再转发给它）；传 NULL/空则直连。fm_start 前调用。 */
+void        fm_set_upstream_proxy(FmContext* ctx, const char* host_port);
 void        fm_set_http_callback(FmContext* ctx, FmHttpCallback cb, void* user);
 void        fm_set_intercept_callback(FmContext* ctx, FmInterceptCallback cb, void* user);
 bool        fm_start(FmContext* ctx);   /* 失败返回 false，用 fm_last_error 取原因 */
 void        fm_stop(FmContext* ctx);
 const char* fm_last_error(FmContext* ctx);
 bool        fm_export_ca(FmContext* ctx, const char* out_path);  /* 导出当前生效 CA(PEM) */
-bool        fm_install_ca(FmContext* ctx);                       /* 安装当前 CA 到用户根存储(Windows) */
+bool        fm_install_ca(FmContext* ctx);      /* 安装当前 CA 到用户根存储(Windows) */
+bool        fm_is_ca_installed(FmContext* ctx); /* 当前 CA 是否已装进用户根存储(Windows) */
+bool        fm_set_system_proxy(FmContext* ctx, uint16_t port); /* 系统代理指向 127.0.0.1:port */
+bool        fm_clear_system_proxy(FmContext* ctx);              /* 关闭系统代理 */
 const char* fm_version(void);
 
 /* ---- 事件读取（仅回调期间有效）---- */

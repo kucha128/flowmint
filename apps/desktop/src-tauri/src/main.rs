@@ -5,13 +5,12 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod sysint;
-
 use std::path::PathBuf;
 use std::sync::Mutex;
 
 use flowmint_engine::Engine;
 use flowmint_storage::SearchFilter;
+use flowmint_sysint as sysint;
 use tauri::{async_runtime, Emitter, State};
 
 struct AppState {
@@ -19,7 +18,6 @@ struct AppState {
     task: Mutex<Option<async_runtime::JoinHandle<()>>>,
     port: Mutex<Option<u16>>,
     data_dir: PathBuf,
-    saved_proxy: Mutex<Option<sysint::SavedProxy>>,
 }
 
 #[tauri::command]
@@ -106,7 +104,14 @@ fn install_ca(state: State<'_, AppState>, use_default_ca: bool) -> Result<String
         .engine
         .active_ca_pem(use_default_ca)
         .map_err(|e| e.to_string())?;
-    sysint::install_ca_pem(&pem)
+    sysint::install_ca_pem(&pem).map(|_| "证书已安装到「当前用户 - 受信任的根证书颁发机构」".to_string())
+}
+
+/// 当前生效的 CA 是否已装进用户根存储。
+#[tauri::command]
+fn is_ca_installed(state: State<'_, AppState>, use_default_ca: bool) -> Result<bool, String> {
+    let ca = state.engine.active_ca(use_default_ca).map_err(|e| e.to_string())?;
+    Ok(sysint::is_ca_installed(&ca.ca_der()))
 }
 
 /// 删除本机 CA 并重新生成一张全新的（「创建新证书」）。
@@ -115,26 +120,16 @@ fn regenerate_ca(state: State<'_, AppState>) -> Result<(), String> {
     state.engine.regenerate_ca().map(|_| ()).map_err(|e| e.to_string())
 }
 
-/// 把系统代理设为 127.0.0.1:port（先备份原设置以便还原）。
+/// 把系统代理设为 127.0.0.1:port 并开启。
 #[tauri::command]
-fn set_system_proxy(state: State<'_, AppState>, port: u16) -> Result<(), String> {
-    {
-        let mut saved = state.saved_proxy.lock().unwrap();
-        if saved.is_none() {
-            *saved = Some(sysint::read_proxy());
-        }
-    }
-    sysint::set_proxy(port).map_err(|e| e.to_string())
+fn set_system_proxy(_state: State<'_, AppState>, port: u16) -> Result<(), String> {
+    sysint::set_system_proxy(port)
 }
 
-/// 还原系统代理到设置前的状态。
+/// 关闭系统代理。
 #[tauri::command]
-fn clear_system_proxy(state: State<'_, AppState>) -> Result<(), String> {
-    let saved = state.saved_proxy.lock().unwrap().take();
-    if let Some(s) = saved {
-        sysint::restore_proxy(&s).map_err(|e| e.to_string())?;
-    }
-    Ok(())
+fn clear_system_proxy(_state: State<'_, AppState>) -> Result<(), String> {
+    sysint::disable_system_proxy()
 }
 
 /// 重放 / 构造器：发送一条请求，返回响应。
@@ -245,7 +240,6 @@ fn main() {
             task: Mutex::new(None),
             port: Mutex::new(None),
             data_dir: dir,
-            saved_proxy: Mutex::new(None),
         })
         .setup(move |app| {
             // Bridge engine live flow broadcast → Tauri "flow" events.
@@ -289,6 +283,7 @@ fn main() {
             flow_detail,
             export_har,
             install_ca,
+            is_ca_installed,
             set_system_proxy,
             clear_system_proxy,
             send_request,

@@ -2,8 +2,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   captureStatus, clearStorage, clearSystemProxy, exportHar, flowDetail, getConfig, installCa,
-  onBreakpoint, onFlow, regenerateCa, resumeBreakpoint, searchFlows, setBreakpoints, setConfig,
-  setSystemProxy, startCapture, stopCapture, type Flow, type FlowDetail, type PausedMessage,
+  isCaInstalled, onBreakpoint, onFlow, regenerateCa, resumeBreakpoint, searchFlows, setBreakpoints,
+  setConfig, setSystemProxy, startCapture, stopCapture, type Flow, type FlowDetail, type PausedMessage,
 } from "./lib/api";
 import { curlOf, seedFromDetail, urlFromFlow, type ComposerSeed } from "./lib/format";
 import { MenuBar, type MenuDef } from "./components/MenuBar";
@@ -35,7 +35,11 @@ export default function App() {
   const [seed, setSeed] = useState<ComposerSeed | null>(null);
   const [listWidth, setListWidth] = useState(640);
   const [modal, setModal] = useState<null | "about" | "settings">(null);
+  const [caInstalled, setCaInstalled] = useState(false);
   const [ctx, setCtx] = useState<CtxState | null>(null);
+
+  const refreshCaStatus = (dca = useDefaultCa) =>
+    isCaInstalled(dca).then(setCaInstalled).catch(() => {});
   const seen = useRef<Set<string>>(new Set());
 
   useEffect(() => {
@@ -43,6 +47,7 @@ export default function App() {
     getConfig().then((c) => {
       setPort(c.port); setMitm(c.mitm); setInsecure(c.insecure);
       setUpstream(c.upstream); setUseDefaultCa(c.use_default_ca);
+      refreshCaStatus(c.use_default_ca);
     }).catch(() => {});
     captureStatus().then(setRunning).catch(() => {});
     searchFlows("", 2000).then((fs) => {
@@ -91,7 +96,7 @@ export default function App() {
         await stopCapture();
         if (sysProxy) { try { await clearSystemProxy(); } catch { /* ignore */ } setSysProxy(false); }
         setRunning(null);
-        setBanner("已停止抓包" + (sysProxy ? "，系统代理已还原" : ""));
+        setBanner("已停止抓包" + (sysProxy ? "，系统代理已关闭" : ""));
       } else {
         await beginCapture();
         setRunning(port);
@@ -143,7 +148,7 @@ export default function App() {
         setBanner(running != null ? "系统代理已指向 FlowMint" : "系统代理已设置（注意：未抓包时该端口无监听）");
       } else {
         await clearSystemProxy();
-        setBanner("系统代理已还原");
+        setBanner("系统代理已关闭");
       }
       setSysProxy(v);
     } catch (e) { setBanner("系统代理操作失败: " + e); }
@@ -177,15 +182,17 @@ export default function App() {
   // 证书区两个动作：都切换到对应证书并安装到本机。
   async function useDefaultCert() {
     await changeDefaultCa(true);
-    installCa(true).then((m) => setBanner("已使用默认证书并安装 · " + m)).catch((e) => setBanner("安装证书失败: " + e));
+    try { setBanner("已使用默认证书并安装 · " + (await installCa(true))); }
+    catch (e) { setBanner("安装证书失败: " + e); }
+    refreshCaStatus(true);
   }
   async function createNewCert() {
     try {
       await regenerateCa();
       await changeDefaultCa(false);
-      const m = await installCa(false);
-      setBanner("已创建新证书并安装 · " + m);
+      setBanner("已创建新证书并安装 · " + (await installCa(false)));
     } catch (e) { setBanner("创建证书失败: " + e); }
+    refreshCaStatus(false);
   }
   function doExportHar() { exportHar(filter || undefined).then((p) => setBanner("HAR → " + p)).catch((e) => setBanner(String(e))); }
 
@@ -246,7 +253,7 @@ export default function App() {
     ] },
     { title: "工具", items: [
       { label: "请求构造器", onClick: () => { setSeed(null); setMode("compose"); } },
-      { label: "设置…", onClick: () => setModal("settings") },
+      { label: "设置…", onClick: () => { refreshCaStatus(); setModal("settings"); } },
     ] },
     { title: "帮助", items: [
       { label: "关于 FlowMint Studio", onClick: () => setModal("about") },
@@ -276,6 +283,7 @@ export default function App() {
         sysProxy={sysProxy} onToggleSysProxy={changeSysProxy}
         running={running} mitm={mitm} upstream={upstream}
         flowCount={flows.length} banner={banner}
+        caInstalled={caInstalled} onCert={() => { refreshCaStatus(); setModal("settings"); }}
       />
 
       {ctx && <ContextMenu menu={ctx} onClose={() => setCtx(null)} />}
@@ -286,7 +294,8 @@ export default function App() {
           port={port} setPort={setPort}
           mitm={mitm} onMitm={changeMitm} insecure={insecure} onInsecure={changeInsecure}
           upstream={upstream} onSave={applyUpstream}
-          useDefaultCa={useDefaultCa} onUseDefault={useDefaultCert} onCreateNew={createNewCert}
+          useDefaultCa={useDefaultCa} caInstalled={caInstalled}
+          onUseDefault={useDefaultCert} onCreateNew={createNewCert}
         />
       )}
     </div>
