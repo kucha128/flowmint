@@ -51,19 +51,31 @@ async fn landing_page_and_cert_download() {
     assert!(root.starts_with("HTTP/1.1 200"), "落地页应 200：{root}");
     assert!(root.contains("text/html"), "应是 HTML");
     assert!(root.contains("FlowMint"), "应含品牌名");
-    assert!(root.contains("/cert.crt") && root.contains("/cert.cer"), "应有 crt 与 cer 下载链接");
-    assert!(root.contains("Windows") && root.contains("iOS"), "应有各平台安装引导");
+    assert!(
+        root.contains("/cert.crt") && root.contains("/cert.cer"),
+        "应有 crt 与 cer 下载链接"
+    );
+    assert!(
+        root.contains("Windows") && root.contains("iOS"),
+        "应有各平台安装引导"
+    );
 
     // PEM 证书下载（Windows/macOS/Android）
     let pem = get(addr, "/cert.crt").await;
     assert!(pem.starts_with("HTTP/1.1 200"), "crt 应 200：{pem}");
-    assert!(pem.contains("attachment; filename=\"flowmint-ca.crt\""), "应是 .crt 附件");
+    assert!(
+        pem.contains("attachment; filename=\"flowmint-ca.crt\""),
+        "应是 .crt 附件"
+    );
     assert!(pem.contains("BEGIN CERTIFICATE"), "应返回 PEM 内容");
 
     // DER 证书下载（iOS）
     let der = get(addr, "/cert.cer").await;
     assert!(der.starts_with("HTTP/1.1 200"), "cer 应 200：{der}");
-    assert!(der.contains("attachment; filename=\"flowmint-ca.cer\""), "应是 .cer 附件");
+    assert!(
+        der.contains("attachment; filename=\"flowmint-ca.cer\""),
+        "应是 .cer 附件"
+    );
 
     // 裸 /cert 仍返回 PEM（向后兼容）
     let bare = get(addr, "/cert").await;
@@ -71,5 +83,8 @@ async fn landing_page_and_cert_download() {
 
     // 未知路径 404
     let missing = get(addr, "/nope").await;
-    assert!(missing.starts_with("HTTP/1.1 404"), "未知路径应 404：{missing}");
+    assert!(
+        missing.starts_with("HTTP/1.1 404"),
+        "未知路径应 404：{missing}"
+    );
 }

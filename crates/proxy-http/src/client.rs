@@ -34,8 +34,9 @@ pub async fn send_request(
     let tcp = TcpStream::connect((host, port)).await?;
     let _ = tcp.set_nodelay(true);
     if https {
-        let cfg = tls_config
-            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "https 需要 TLS 配置"))?;
+        let cfg = tls_config.ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "https 需要 TLS 配置")
+        })?;
         let connector = TlsConnector::from(cfg);
         let name = ServerName::try_from(host.to_string())
             .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, "非法主机名"))?;
@@ -54,7 +55,9 @@ async fn exchange<S: AsyncRead + AsyncWrite + Unpin>(
     headers: &[(String, String)],
     body: &[u8],
 ) -> std::io::Result<SendResult> {
-    stream.write_all(&build_request(method, host, path, headers, body)).await?;
+    stream
+        .write_all(&build_request(method, host, path, headers, body))
+        .await?;
     stream.flush().await?;
 
     let mut reader = BufReader::new(stream);
@@ -68,16 +71,29 @@ async fn exchange<S: AsyncRead + AsyncWrite + Unpin>(
         Some(h) => read_body(&mut reader, h, true).await.unwrap_or_default(),
         None => Vec::new(),
     };
-    Ok(SendResult { status, headers: resp_headers, body: resp_body })
+    Ok(SendResult {
+        status,
+        headers: resp_headers,
+        body: resp_body,
+    })
 }
 
-fn build_request(method: &str, host: &str, path: &str, headers: &[(String, String)], body: &[u8]) -> Vec<u8> {
+fn build_request(
+    method: &str,
+    host: &str,
+    path: &str,
+    headers: &[(String, String)],
+    body: &[u8],
+) -> Vec<u8> {
     let mut out = format!("{method} {path} HTTP/1.1\r\n").into_bytes();
     let mut has_host = false;
     for (k, v) in headers {
         let lk = k.to_ascii_lowercase();
         // 长度/连接类头由我们自己控制，避免与实际不一致。
-        if matches!(lk.as_str(), "connection" | "content-length" | "proxy-connection" | "transfer-encoding") {
+        if matches!(
+            lk.as_str(),
+            "connection" | "content-length" | "proxy-connection" | "transfer-encoding"
+        ) {
             continue;
         }
         if lk == "host" {
@@ -111,11 +127,15 @@ mod tests {
             let mut buf = [0u8; 1024];
             let _ = sock.read(&mut buf).await; // 读掉请求
             let _ = sock
-                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nhello")
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nhello",
+                )
                 .await;
         });
 
-        let r = send_request("GET", "127.0.0.1", addr.port(), "/x", false, &[], b"", None).await.unwrap();
+        let r = send_request("GET", "127.0.0.1", addr.port(), "/x", false, &[], b"", None)
+            .await
+            .unwrap();
         assert_eq!(r.status, 200);
         assert_eq!(r.body, b"hello");
     }

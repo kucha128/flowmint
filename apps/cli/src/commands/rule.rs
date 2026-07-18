@@ -12,12 +12,11 @@ use flowmint_model::Rule;
 /// `- redact: {...}`（serde_json 的单键 map 形式），而非 serde_yaml 0.9 的
 /// `!redact` tag 形式。
 pub fn load_rule(path: &Path) -> Result<Rule> {
-    let text = std::fs::read_to_string(path)
-        .with_context(|| format!("读取规则 {}", path.display()))?;
+    let text =
+        std::fs::read_to_string(path).with_context(|| format!("读取规则 {}", path.display()))?;
     let value: serde_json::Value = serde_yaml::from_str(&text)
         .with_context(|| format!("解析规则 {} (YAML/JSON)", path.display()))?;
-    serde_json::from_value::<Rule>(value)
-        .with_context(|| format!("解释规则 {}", path.display()))
+    serde_json::from_value::<Rule>(value).with_context(|| format!("解释规则 {}", path.display()))
 }
 
 pub fn validate(path: &Path) -> Result<()> {

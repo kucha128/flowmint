@@ -68,7 +68,12 @@ mod win {
     extern "system" {
         fn OpenProcess(access: u32, inherit: i32, pid: u32) -> *mut c_void;
         fn CloseHandle(h: *mut c_void) -> i32;
-        fn QueryFullProcessImageNameW(h: *mut c_void, flags: u32, buf: *mut u16, size: *mut u32) -> i32;
+        fn QueryFullProcessImageNameW(
+            h: *mut c_void,
+            flags: u32,
+            buf: *mut u16,
+            size: *mut u32,
+        ) -> i32;
     }
 
     const AF_INET: c_ulong = 2;
@@ -81,13 +86,25 @@ mod win {
         unsafe {
             let mut size: c_ulong = 0;
             // 先取所需缓冲区大小。
-            GetExtendedTcpTable(std::ptr::null_mut(), &mut size, 0, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0);
+            GetExtendedTcpTable(
+                std::ptr::null_mut(),
+                &mut size,
+                0,
+                AF_INET,
+                TCP_TABLE_OWNER_PID_ALL,
+                0,
+            );
             if size == 0 {
                 return None;
             }
             let mut buf = vec![0u8; size as usize];
             let ret = GetExtendedTcpTable(
-                buf.as_mut_ptr() as *mut c_void, &mut size, 0, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0,
+                buf.as_mut_ptr() as *mut c_void,
+                &mut size,
+                0,
+                AF_INET,
+                TCP_TABLE_OWNER_PID_ALL,
+                0,
             );
             if ret != NO_ERROR {
                 return None;

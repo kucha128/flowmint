@@ -1,0 +1,68 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # 创建 Release 并上传产物
+
+jobs:
+  release-windows:
+    name: Build & publish (Windows x64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # 1) SDK 核心（flowmint.dll + 导入库）与 CLI（flowmint.exe）
+      - name: Build SDK + CLI
+        run: cargo build --release -p flowmint-ffi -p flowmint-cli
+
+      # 2) 桌面抓包工具（便携单 exe，依赖系统 WebView2）
+      - name: Build desktop app
+        working-directory: apps/desktop
+        run: |
+          npm ci
+          npm run tauri build -- --no-bundle
+
+      # 3) 组装发布包（绝不包含 data/、ca 私钥）
+      - name: Package artifacts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          # Windows 抓包工具（桌面）
+          Compress-Archive -Path apps/desktop/src-tauri/target/release/flowmint-studio.exe `
+            -DestinationPath dist/flowmint-studio-windows-x64.zip -Force
+          # CLI
+          Compress-Archive -Path target/release/flowmint.exe `
+            -DestinationPath dist/flowmint-cli-windows-x64.zip -Force
+          # SDK：dll + 导入库 + 头文件 + 各语言绑定/示例
+          New-Item -ItemType Directory -Force sdk-pkg | Out-Null
+          Copy-Item target/release/flowmint.dll      sdk-pkg/
+          Copy-Item target/release/flowmint.dll.lib  sdk-pkg/
+          Copy-Item crates/ffi/include/flowmint.h    sdk-pkg/
+          Copy-Item -Recurse sdks                    sdk-pkg/sdks
+          Compress-Archive -Path sdk-pkg/* `
+            -DestinationPath dist/flowmint-sdk-windows-x64.zip -Force
+
+      # 4) 建 Release 并上传三个 zip
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.zip
+          generate_release_notes: true
+          body: |
+            FlowMint ${{ github.ref_name }} — Windows x64
+
+            - `flowmint-studio-windows-x64.zip`：桌面抓包分析器（便携 exe，需系统 WebView2）
+            - `flowmint-cli-windows-x64.zip`：命令行工具 `flowmint.exe`
+            - `flowmint-sdk-windows-x64.zip`：SDK（`flowmint.dll` + `flowmint.dll.lib` + `flowmint.h` + 各语言绑定/示例）
+
+            首次用 HTTPS 解密：软件会在本机自动生成专属 CA，按提示「安装证书」即可（发布包不含任何证书/私钥）。
+            未签名 exe 首次运行 Windows SmartScreen 可能提示，点「更多信息 → 仍要运行」。

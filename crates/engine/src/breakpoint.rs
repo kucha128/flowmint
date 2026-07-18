@@ -65,7 +65,11 @@ impl Interceptor {
     ) {
         let decision = match action {
             "drop" => Decision::Drop,
-            "modify" => Decision::Modify(Edit { status, headers, body }),
+            "modify" => Decision::Modify(Edit {
+                status,
+                headers,
+                body,
+            }),
             _ => Decision::Continue,
         };
         if let Some(tx) = self.pending.lock().unwrap().remove(&id) {

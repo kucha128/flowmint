@@ -86,7 +86,10 @@ pub async fn read_frame<R: AsyncRead + Unpin>(r: &mut R) -> io::Result<Option<Fr
 
     // Guard against absurd frames (design §6.1 limits).
     if payload_len > 64 * 1024 * 1024 {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "ws frame too large"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "ws frame too large",
+        ));
     }
     let mut payload = vec![0u8; payload_len];
     r.read_exact(&mut payload).await?;
@@ -96,7 +99,12 @@ pub async fn read_frame<R: AsyncRead + Unpin>(r: &mut R) -> io::Result<Option<Fr
         }
     }
 
-    Ok(Some(Frame { fin, opcode, masked, payload }))
+    Ok(Some(Frame {
+        fin,
+        opcode,
+        masked,
+        payload,
+    }))
 }
 
 impl Opcode {
@@ -134,7 +142,13 @@ pub fn encode_frame(frame: &Frame, mask: Option<[u8; 4]>) -> Vec<u8> {
     match mask {
         Some(key) => {
             out.extend_from_slice(&key);
-            out.extend(frame.payload.iter().enumerate().map(|(i, b)| b ^ key[i % 4]));
+            out.extend(
+                frame
+                    .payload
+                    .iter()
+                    .enumerate()
+                    .map(|(i, b)| b ^ key[i % 4]),
+            );
         }
         None => out.extend_from_slice(&frame.payload),
     }
@@ -147,7 +161,12 @@ mod tests {
 
     #[tokio::test]
     async fn encode_then_read_roundtrips() {
-        let frame = Frame { fin: true, opcode: Opcode::Text, masked: true, payload: b"hello world".to_vec() };
+        let frame = Frame {
+            fin: true,
+            opcode: Opcode::Text,
+            masked: true,
+            payload: b"hello world".to_vec(),
+        };
         let bytes = encode_frame(&frame, Some([1, 2, 3, 4]));
         let mut cursor = std::io::Cursor::new(bytes);
         let back = read_frame(&mut cursor).await.unwrap().unwrap();
@@ -155,7 +174,12 @@ mod tests {
         assert_eq!(back.payload, b"hello world");
 
         // Larger unmasked payload uses extended length.
-        let big = Frame { fin: true, opcode: Opcode::Binary, masked: false, payload: vec![7u8; 500] };
+        let big = Frame {
+            fin: true,
+            opcode: Opcode::Binary,
+            masked: false,
+            payload: vec![7u8; 500],
+        };
         let bytes = encode_frame(&big, None);
         let mut cursor = std::io::Cursor::new(bytes);
         let back = read_frame(&mut cursor).await.unwrap().unwrap();
@@ -167,7 +191,11 @@ mod tests {
         // A masked "Hi" text frame (client -> server).
         let mask = [0x37u8, 0xfa, 0x21, 0x3d];
         let data = b"Hi";
-        let masked: Vec<u8> = data.iter().enumerate().map(|(i, b)| b ^ mask[i % 4]).collect();
+        let masked: Vec<u8> = data
+            .iter()
+            .enumerate()
+            .map(|(i, b)| b ^ mask[i % 4])
+            .collect();
         let mut buf = vec![0x81u8, 0x80 | 2];
         buf.extend_from_slice(&mask);
         buf.extend_from_slice(&masked);

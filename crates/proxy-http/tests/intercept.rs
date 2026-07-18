@@ -42,7 +42,11 @@ impl InterceptHook for TestHook {
             } else {
                 let mut headers = msg.headers;
                 headers.push(("X-Injected".into(), "yes".into()));
-                Decision::Modify(Edit { status: None, headers, body: b"MODIFIED-REQUEST".to_vec() })
+                Decision::Modify(Edit {
+                    status: None,
+                    headers,
+                    body: b"MODIFIED-REQUEST".to_vec(),
+                })
             }
         })
     }
@@ -97,9 +101,18 @@ async fn breakpoint_modifies_request_and_response() {
 
     // 源站应收到"改后的请求"。
     let got = recorded.lock().unwrap().clone();
-    assert!(got.contains("X-Injected: yes"), "源站未收到注入的请求头: {got}");
-    assert!(got.contains("MODIFIED-REQUEST"), "源站未收到改后的请求体: {got}");
+    assert!(
+        got.contains("X-Injected: yes"),
+        "源站未收到注入的请求头: {got}"
+    );
+    assert!(
+        got.contains("MODIFIED-REQUEST"),
+        "源站未收到改后的请求体: {got}"
+    );
 
     // 客户端应收到"改后的响应"。
-    assert!(resp.contains("MODIFIED-RESPONSE"), "客户端未收到改后的响应: {resp}");
+    assert!(
+        resp.contains("MODIFIED-RESPONSE"),
+        "客户端未收到改后的响应: {resp}"
+    );
 }

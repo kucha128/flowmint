@@ -124,6 +124,11 @@ Rust workspace (multiple crates) + Tauri desktop app + multi-language SDKs.
   undecrypted CONNECT tunnels record metadata only; AI/MCP is read-only and redaction-enforced.
   Use only on traffic you are authorized to inspect and modify.
 
+## Community
+
+- QQ group (Chinese): **342696759**
+- Questions, ideas, bugs: open an [Issue](../../issues).
+
 ## License
 
 [MIT](LICENSE). Reused third-party components remain under their own licenses; maintain

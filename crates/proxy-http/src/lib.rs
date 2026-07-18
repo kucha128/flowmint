@@ -186,7 +186,11 @@ async fn handle_plain<S: FlowSink>(
     let method = head.start_line.0.clone();
     let url = format!("http://{host}:{port}{path}");
     // 经上游代理时请求行须用绝对形式（GET http://host/path），直连时用 origin 形式。
-    let req_target = if ctx.upstream_proxy.is_some() { url.clone() } else { path.clone() };
+    let req_target = if ctx.upstream_proxy.is_some() {
+        url.clone()
+    } else {
+        path.clone()
+    };
 
     // 请求断点（转发前）。
     let Some((req_headers, req_body)) =
@@ -215,12 +219,28 @@ async fn handle_plain<S: FlowSink>(
     let client_ep = client_endpoint(peer);
     let server_ep = server_endpoint(&host, port);
     capture_exchange(
-        &ctx, &client_ep, &server_ep, &host, &path, &method, &req_headers, &req_body,
-        status, &resp_headers, &resp_body, false, None,
+        &ctx,
+        &client_ep,
+        &server_ep,
+        &host,
+        &path,
+        &method,
+        &req_headers,
+        &req_body,
+        status,
+        &resp_headers,
+        &resp_body,
+        false,
+        None,
     );
 
     client
-        .write_all(&build_client_response(status.unwrap_or(0), &resp_headers, &resp_body, false))
+        .write_all(&build_client_response(
+            status.unwrap_or(0),
+            &resp_headers,
+            &resp_body,
+            false,
+        ))
         .await?;
     client.flush().await?;
     Ok(())
@@ -246,7 +266,9 @@ async fn handle_connect_tunnel<S: FlowSink>(
             return Ok(());
         }
     };
-    client.write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n").await?;
+    client
+        .write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+        .await?;
     client.flush().await?;
 
     let client_ep = client_endpoint(peer);
@@ -263,8 +285,14 @@ async fn handle_connect_tunnel<S: FlowSink>(
     flow.secure = true; // CONNECT 隧道即加密（未解密）的 HTTPS
     ctx.sink.upsert_flow(flow);
     let mut open_ev = mk_event(
-        &ctx, &flow_id, 0, Direction::ClientToServer, EventKind::FlowOpened, client_ep.clone(),
-        server_ep.clone(), pstack("connect", None),
+        &ctx,
+        &flow_id,
+        0,
+        Direction::ClientToServer,
+        EventKind::FlowOpened,
+        client_ep.clone(),
+        server_ep.clone(),
+        pstack("connect", None),
     );
     open_ev.attributes.insert("tunnel".into(), true.into());
     open_ev.attributes.insert("decrypted".into(), false.into());
@@ -277,7 +305,13 @@ async fn handle_connect_tunnel<S: FlowSink>(
     let _ = tokio::join!(c2s, s2c);
 
     ctx.sink.record_event(mk_event(
-        &ctx, &flow_id, 1, Direction::Unspecified, EventKind::FlowClosed, server_ep, client_ep,
+        &ctx,
+        &flow_id,
+        1,
+        Direction::Unspecified,
+        EventKind::FlowClosed,
+        server_ep,
+        client_ep,
         pstack("connect", None),
     ));
     Ok(())
@@ -297,7 +331,9 @@ async fn handle_connect_mitm<S: FlowSink>(
         return Ok(());
     };
     let mut client = buf.into_inner();
-    client.write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n").await?;
+    client
+        .write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+        .await?;
     client.flush().await?;
 
     // Terminate the client's TLS with a leaf minted for the CONNECT target.
@@ -342,9 +378,13 @@ async fn handle_connect_mitm<S: FlowSink>(
         if req_bytes.is_empty() {
             break; // client closed the tunnel
         }
-        let Some(req_head) = parse_head(&req_bytes) else { break };
+        let Some(req_head) = parse_head(&req_bytes) else {
+            break;
+        };
         let path = req_head.start_line.1.clone();
-        let req_body = read_body(&mut client_reader, &req_head, false).await.unwrap_or_default();
+        let req_body = read_body(&mut client_reader, &req_head, false)
+            .await
+            .unwrap_or_default();
         let method = req_head.start_line.0.clone();
         let url = format!("https://{host}:{port}{path}");
 
@@ -400,11 +440,28 @@ async fn handle_connect_mitm<S: FlowSink>(
         };
 
         capture_exchange(
-            &ctx, &client_ep, &server_ep, &host, &path, &method, &req_headers, &req_body,
-            status, &resp_headers, &resp_body, true, Some(&tunnel_id),
+            &ctx,
+            &client_ep,
+            &server_ep,
+            &host,
+            &path,
+            &method,
+            &req_headers,
+            &req_body,
+            status,
+            &resp_headers,
+            &resp_body,
+            true,
+            Some(&tunnel_id),
         );
 
-        cw.write_all(&build_client_response(status.unwrap_or(0), &resp_headers, &resp_body, !is_upgrade)).await?;
+        cw.write_all(&build_client_response(
+            status.unwrap_or(0),
+            &resp_headers,
+            &resp_body,
+            !is_upgrade,
+        ))
+        .await?;
         cw.flush().await?;
         if is_upgrade {
             break;
@@ -422,7 +479,8 @@ async fn http_exchange<U: AsyncRead + AsyncWrite + Unpin>(
     path: &str,
     body: &[u8],
 ) -> std::io::Result<(Option<u16>, Vec<(String, String)>, Vec<u8>)> {
-    up.write_all(&build_upstream_request(method, headers, path, body)).await?;
+    up.write_all(&build_upstream_request(method, headers, path, body))
+        .await?;
     up.flush().await?;
     let mut reader = BufReader::new(up);
     let resp_bytes = read_head_bytes(&mut reader).await?;
@@ -482,7 +540,9 @@ async fn dial_upstream(
 }
 
 fn is_ws_upgrade(head: &Head) -> bool {
-    head.get("upgrade").map(|u| u.eq_ignore_ascii_case("websocket")).unwrap_or(false)
+    head.get("upgrade")
+        .map(|u| u.eq_ignore_ascii_case("websocket"))
+        .unwrap_or(false)
 }
 
 /// Read an HTTP head directly off a stream (byte-at-a-time) so no bytes past the
@@ -530,12 +590,20 @@ async fn relay_plain_ws<S: FlowSink>(
     ctx: ProxyContext<S>,
 ) -> std::io::Result<()> {
     // 经上游代理时握手请求行也要用绝对形式。
-    let target = if ctx.upstream_proxy.is_some() { format!("http://{host}:{port}{path}") } else { path.clone() };
-    upstream.write_all(&build_upgrade_request(&head, &target)).await?;
+    let target = if ctx.upstream_proxy.is_some() {
+        format!("http://{host}:{port}{path}")
+    } else {
+        path.clone()
+    };
+    upstream
+        .write_all(&build_upgrade_request(&head, &target))
+        .await?;
     upstream.flush().await?;
     let up_head_bytes = read_head_direct(&mut upstream).await?;
     let up_head = parse_head(&up_head_bytes);
-    let status = up_head.as_ref().and_then(|h| h.start_line.1.parse::<u16>().ok());
+    let status = up_head
+        .as_ref()
+        .and_then(|h| h.start_line.1.parse::<u16>().ok());
 
     // Forward the response head verbatim (keeps Sec-WebSocket-Accept etc.).
     client.write_all(&up_head_bytes).await?;
@@ -545,21 +613,53 @@ async fn relay_plain_ws<S: FlowSink>(
         // Server declined the upgrade: blind-relay whatever follows.
         let (mut cr, mut cw) = tokio::io::split(client);
         let (mut ur, mut uw) = tokio::io::split(upstream);
-        let _ = tokio::join!(tokio::io::copy(&mut cr, &mut uw), tokio::io::copy(&mut ur, &mut cw));
+        let _ = tokio::join!(
+            tokio::io::copy(&mut cr, &mut uw),
+            tokio::io::copy(&mut ur, &mut cw)
+        );
         return Ok(());
     }
 
     let client_ep = client_endpoint(peer);
     let server_ep = server_endpoint(&host, port);
-    let flow_id = capture_ws_open(&ctx, &client_ep, &server_ep, &host, &path, &head, up_head.as_ref(), None);
+    let flow_id = capture_ws_open(
+        &ctx,
+        &client_ep,
+        &server_ep,
+        &host,
+        &path,
+        &head,
+        up_head.as_ref(),
+        None,
+    );
 
     let (cr, cw) = tokio::io::split(client);
     let (ur, uw) = tokio::io::split(upstream);
     let seq = Arc::new(AtomicU64::new(2));
-    let c2s = pump_ws(cr, uw, Some([0x21, 0x43, 0x65, 0x87]), Direction::ClientToServer,
-        ctx.clone(), flow_id.clone(), seq.clone(), client_ep.clone(), server_ep.clone(), None);
-    let s2c = pump_ws(ur, cw, None, Direction::ServerToClient,
-        ctx.clone(), flow_id.clone(), seq.clone(), server_ep, client_ep, None);
+    let c2s = pump_ws(
+        cr,
+        uw,
+        Some([0x21, 0x43, 0x65, 0x87]),
+        Direction::ClientToServer,
+        ctx.clone(),
+        flow_id.clone(),
+        seq.clone(),
+        client_ep.clone(),
+        server_ep.clone(),
+        None,
+    );
+    let s2c = pump_ws(
+        ur,
+        cw,
+        None,
+        Direction::ServerToClient,
+        ctx.clone(),
+        flow_id.clone(),
+        seq.clone(),
+        server_ep,
+        client_ep,
+        None,
+    );
     let _ = tokio::join!(c2s, s2c);
     Ok(())
 }
@@ -589,12 +689,24 @@ async fn pump_ws<S, R, W>(
             _ => break,
         };
         let s = seq.fetch_add(1, Ordering::Relaxed);
-        let mut ev = mk_event(&ctx, &flow_id, s, direction, EventKind::WebSocketFrame,
-            src.clone(), dst.clone(), pstack("websocket", tls.clone()));
-        ev.attributes.insert("ws.opcode".into(), frame.opcode.as_str().into());
+        let mut ev = mk_event(
+            &ctx,
+            &flow_id,
+            s,
+            direction,
+            EventKind::WebSocketFrame,
+            src.clone(),
+            dst.clone(),
+            pstack("websocket", tls.clone()),
+        );
+        ev.attributes
+            .insert("ws.opcode".into(), frame.opcode.as_str().into());
         ev.attributes.insert("ws.fin".into(), frame.fin.into());
-        ev.attributes.insert("ws.length".into(), (frame.payload.len() as i64).into());
-        if matches!(frame.opcode, ws::Opcode::Text | ws::Opcode::Binary) && !frame.payload.is_empty() {
+        ev.attributes
+            .insert("ws.length".into(), (frame.payload.len() as i64).into());
+        if matches!(frame.opcode, ws::Opcode::Text | ws::Opcode::Binary)
+            && !frame.payload.is_empty()
+        {
             ev.payload = ctx.sink.put_payload(&frame.payload, RedactionState::None);
         }
         ctx.sink.record_event(ev);
@@ -638,19 +750,41 @@ fn capture_ws_open<S: FlowSink>(
     ctx.sink.upsert_flow(flow);
 
     let stack = pstack("websocket", tls);
-    let mut req_ev = mk_event(ctx, &flow_id, 0, Direction::ClientToServer,
-        EventKind::HttpRequestHeaders, client_ep.clone(), server_ep.clone(), stack.clone());
+    let mut req_ev = mk_event(
+        ctx,
+        &flow_id,
+        0,
+        Direction::ClientToServer,
+        EventKind::HttpRequestHeaders,
+        client_ep.clone(),
+        server_ep.clone(),
+        stack.clone(),
+    );
     req_ev.attributes.insert("http.method".into(), "GET".into());
     req_ev.attributes.insert("http.host".into(), host.into());
     req_ev.attributes.insert("http.path".into(), path.into());
-    req_ev.attributes.insert("http.request_headers".into(), headers_json(req_head));
+    req_ev
+        .attributes
+        .insert("http.request_headers".into(), headers_json(req_head));
     ctx.sink.record_event(req_ev);
 
-    let mut resp_ev = mk_event(ctx, &flow_id, 1, Direction::ServerToClient,
-        EventKind::HttpResponseHeaders, server_ep.clone(), client_ep.clone(), stack);
-    resp_ev.attributes.insert("http.status".into(), 101i64.into());
+    let mut resp_ev = mk_event(
+        ctx,
+        &flow_id,
+        1,
+        Direction::ServerToClient,
+        EventKind::HttpResponseHeaders,
+        server_ep.clone(),
+        client_ep.clone(),
+        stack,
+    );
+    resp_ev
+        .attributes
+        .insert("http.status".into(), 101i64.into());
     if let Some(h) = resp_head {
-        resp_ev.attributes.insert("http.response_headers".into(), headers_json(h));
+        resp_ev
+            .attributes
+            .insert("http.response_headers".into(), headers_json(h));
     }
     ctx.sink.record_event(resp_ev);
     flow_id
@@ -706,26 +840,47 @@ fn capture_exchange<S: FlowSink>(
     let stack = pstack("http/1.1", tls_info);
 
     let mut req_ev = mk_event(
-        ctx, &flow_id, 0, Direction::ClientToServer, EventKind::HttpRequestHeaders,
-        client_ep.clone(), server_ep.clone(), stack.clone(),
+        ctx,
+        &flow_id,
+        0,
+        Direction::ClientToServer,
+        EventKind::HttpRequestHeaders,
+        client_ep.clone(),
+        server_ep.clone(),
+        stack.clone(),
     );
-    req_ev.attributes.insert("http.method".into(), method.into());
+    req_ev
+        .attributes
+        .insert("http.method".into(), method.into());
     req_ev.attributes.insert("http.host".into(), host.into());
     req_ev.attributes.insert("http.path".into(), path.into());
-    req_ev.attributes.insert("http.request_headers".into(), headers_json_of(req_headers));
+    req_ev
+        .attributes
+        .insert("http.request_headers".into(), headers_json_of(req_headers));
     if !req_body.is_empty() {
         req_ev.payload = ctx.sink.put_payload(req_body, RedactionState::None);
     }
     ctx.sink.record_event(req_ev);
 
     let mut resp_ev = mk_event(
-        ctx, &flow_id, 1, Direction::ServerToClient, EventKind::HttpResponseHeaders,
-        server_ep.clone(), client_ep.clone(), stack,
+        ctx,
+        &flow_id,
+        1,
+        Direction::ServerToClient,
+        EventKind::HttpResponseHeaders,
+        server_ep.clone(),
+        client_ep.clone(),
+        stack,
     );
     if let Some(s) = status {
-        resp_ev.attributes.insert("http.status".into(), (s as i64).into());
+        resp_ev
+            .attributes
+            .insert("http.status".into(), (s as i64).into());
     }
-    resp_ev.attributes.insert("http.response_headers".into(), headers_json_of(resp_headers));
+    resp_ev.attributes.insert(
+        "http.response_headers".into(),
+        headers_json_of(resp_headers),
+    );
     if !resp_body.is_empty() {
         resp_ev.payload = ctx.sink.put_payload(resp_body, RedactionState::None);
     }
@@ -753,7 +908,9 @@ async fn request_breakpoint<S: FlowSink>(
     headers: Vec<(String, String)>,
     body: Vec<u8>,
 ) -> Option<(Vec<(String, String)>, Vec<u8>)> {
-    let Some(hook) = &ctx.hook else { return Some((headers, body)) };
+    let Some(hook) = &ctx.hook else {
+        return Some((headers, body));
+    };
     if !hook.enabled() {
         return Some((headers, body));
     }
@@ -781,7 +938,9 @@ async fn response_breakpoint<S: FlowSink>(
     headers: Vec<(String, String)>,
     body: Vec<u8>,
 ) -> Option<(Option<u16>, Vec<(String, String)>, Vec<u8>)> {
-    let Some(hook) = &ctx.hook else { return Some((status, headers, body)) };
+    let Some(hook) = &ctx.hook else {
+        return Some((status, headers, body));
+    };
     if !hook.enabled() {
         return Some((status, headers, body));
     }
@@ -802,7 +961,10 @@ async fn response_breakpoint<S: FlowSink>(
 
 fn is_loopback_host(host: &str) -> bool {
     host == "localhost"
-        || host.parse::<std::net::IpAddr>().map(|ip| ip.is_loopback()).unwrap_or(false)
+        || host
+            .parse::<std::net::IpAddr>()
+            .map(|ip| ip.is_loopback())
+            .unwrap_or(false)
 }
 
 /// 服务代理自身的落地页（对标 Fiddler）：`/` 显示各平台安装引导与下载入口，
@@ -815,7 +977,10 @@ async fn serve_local_page<S: FlowSink>(
     let path = target.split(['?', '#']).next().unwrap_or(target);
 
     // DER（iOS）：.cer / .der
-    let is_der = matches!(path, "/cert.cer" | "/cert.der" | "/ca.cer" | "/root.cer" | "/flowmint-ca.cer");
+    let is_der = matches!(
+        path,
+        "/cert.cer" | "/cert.der" | "/ca.cer" | "/root.cer" | "/flowmint-ca.cer"
+    );
     // PEM（Windows/macOS/Android）：.crt / .pem 以及裸 /cert
     let is_pem = matches!(
         path,
@@ -824,16 +989,41 @@ async fn serve_local_page<S: FlowSink>(
 
     let resp = if is_der {
         match &ctx.ca_der {
-            Some(der) => http_response(200, "application/x-x509-ca-cert", Some("flowmint-ca.cer"), der),
-            None => http_response(503, "text/plain; charset=utf-8", None, "CA 尚未就绪".as_bytes()),
+            Some(der) => http_response(
+                200,
+                "application/x-x509-ca-cert",
+                Some("flowmint-ca.cer"),
+                der,
+            ),
+            None => http_response(
+                503,
+                "text/plain; charset=utf-8",
+                None,
+                "CA 尚未就绪".as_bytes(),
+            ),
         }
     } else if is_pem {
         match &ctx.ca_pem {
-            Some(pem) => http_response(200, "application/x-x509-ca-cert", Some("flowmint-ca.crt"), pem.as_bytes()),
-            None => http_response(503, "text/plain; charset=utf-8", None, "CA 尚未就绪".as_bytes()),
+            Some(pem) => http_response(
+                200,
+                "application/x-x509-ca-cert",
+                Some("flowmint-ca.crt"),
+                pem.as_bytes(),
+            ),
+            None => http_response(
+                503,
+                "text/plain; charset=utf-8",
+                None,
+                "CA 尚未就绪".as_bytes(),
+            ),
         }
     } else if path == "/" {
-        http_response(200, "text/html; charset=utf-8", None, LANDING_HTML.as_bytes())
+        http_response(
+            200,
+            "text/html; charset=utf-8",
+            None,
+            LANDING_HTML.as_bytes(),
+        )
     } else {
         let body = "404 Not Found — 访问 / 查看 FlowMint 证书下载页";
         http_response(404, "text/plain; charset=utf-8", None, body.as_bytes())
@@ -850,13 +1040,20 @@ fn http_response(status: u16, content_type: &str, filename: Option<&str>, body: 
         503 => "Service Unavailable",
         _ => "",
     };
-    let mut out = format!("HTTP/1.1 {status} {reason}\r\nContent-Type: {content_type}\r\n").into_bytes();
+    let mut out =
+        format!("HTTP/1.1 {status} {reason}\r\nContent-Type: {content_type}\r\n").into_bytes();
     if let Some(name) = filename {
         out.extend_from_slice(
             format!("Content-Disposition: attachment; filename=\"{name}\"\r\n").as_bytes(),
         );
     }
-    out.extend_from_slice(format!("Content-Length: {}\r\nConnection: close\r\n\r\n", body.len()).as_bytes());
+    out.extend_from_slice(
+        format!(
+            "Content-Length: {}\r\nConnection: close\r\n\r\n",
+            body.len()
+        )
+        .as_bytes(),
+    );
     out.extend_from_slice(body);
     out
 }
@@ -966,11 +1163,19 @@ fn client_endpoint(peer: SocketAddr) -> Endpoint {
 }
 
 fn server_endpoint(host: &str, port: u16) -> Endpoint {
-    Endpoint { host: Some(host.to_string()), port, ..Default::default() }
+    Endpoint {
+        host: Some(host.to_string()),
+        port,
+        ..Default::default()
+    }
 }
 
 fn pstack(l7: &str, tls: Option<TlsInfo>) -> ProtocolStack {
-    ProtocolStack { l4: "tcp".into(), tls, l7: Some(l7.to_string()) }
+    ProtocolStack {
+        l4: "tcp".into(),
+        tls,
+        l7: Some(l7.to_string()),
+    }
 }
 
 fn mk_event<S: FlowSink>(
@@ -994,11 +1199,19 @@ fn mk_event<S: FlowSink>(
     ev.source = source;
     ev.destination = destination;
     ev.protocol_stack = protocol_stack;
-    ev.evidence = EvidenceRef { adapter: ADAPTER.into(), decoder_version: None };
+    ev.evidence = EvidenceRef {
+        adapter: ADAPTER.into(),
+        decoder_version: None,
+    };
     ev
 }
 
-fn build_upstream_request(method: &str, headers: &[(String, String)], path: &str, body: &[u8]) -> Vec<u8> {
+fn build_upstream_request(
+    method: &str,
+    headers: &[(String, String)],
+    path: &str,
+    body: &[u8],
+) -> Vec<u8> {
     let mut out = format!("{method} {path} HTTP/1.1\r\n").into_bytes();
     for (k, v) in headers {
         if is_hop_by_hop(k) || k.eq_ignore_ascii_case("content-length") {
@@ -1014,7 +1227,12 @@ fn build_upstream_request(method: &str, headers: &[(String, String)], path: &str
     out
 }
 
-fn build_client_response(status: u16, headers: &[(String, String)], body: &[u8], keep_alive: bool) -> Vec<u8> {
+fn build_client_response(
+    status: u16,
+    headers: &[(String, String)],
+    body: &[u8],
+    keep_alive: bool,
+) -> Vec<u8> {
     // 空 reason 短语（"HTTP/1.1 200 \r\n"）合法，客户端可接受。
     let mut out = format!("HTTP/1.1 {status} \r\n").into_bytes();
     for (k, v) in headers {

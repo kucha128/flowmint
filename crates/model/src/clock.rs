@@ -14,7 +14,9 @@ pub struct Clock {
 
 impl Clock {
     pub fn start_now() -> Self {
-        Self { start: Instant::now() }
+        Self {
+            start: Instant::now(),
+        }
     }
 
     /// Stamp "now" relative to this clock's start.

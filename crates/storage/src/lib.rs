@@ -77,7 +77,8 @@ impl Store {
 
     /// 清空所有已捕获数据：删空 flows/events/captures，并清空 chunk 存储。
     pub fn clear(&self) -> Result<()> {
-        self.conn.execute_batch("DELETE FROM events; DELETE FROM flows; DELETE FROM captures;")?;
+        self.conn
+            .execute_batch("DELETE FROM events; DELETE FROM flows; DELETE FROM captures;")?;
         let chunks = self.root.join("chunks");
         if chunks.exists() {
             fs::remove_dir_all(&chunks)?;
@@ -156,9 +157,9 @@ impl Store {
     // --- index writes ----------------------------------------------------
 
     pub fn list_captures(&self) -> Result<Vec<CaptureRow>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT capture_id, started_ms, label FROM captures ORDER BY started_ms DESC")?;
+        let mut stmt = self.conn.prepare(
+            "SELECT capture_id, started_ms, label FROM captures ORDER BY started_ms DESC",
+        )?;
         let rows = stmt.query_map([], |row| {
             Ok(CaptureRow {
                 capture_id: row.get(0)?,
@@ -173,7 +174,12 @@ impl Store {
         Ok(out)
     }
 
-    pub fn insert_capture(&self, capture_id: &str, started_ms: i64, label: Option<&str>) -> Result<()> {
+    pub fn insert_capture(
+        &self,
+        capture_id: &str,
+        started_ms: i64,
+        label: Option<&str>,
+    ) -> Result<()> {
         self.conn.execute(
             "INSERT OR REPLACE INTO captures (capture_id, started_ms, label) VALUES (?1, ?2, ?3)",
             params![capture_id, started_ms, label],
@@ -247,10 +253,14 @@ impl Store {
     }
 
     pub fn get_flow(&self, flow_id: &str) -> Result<Option<Flow>> {
-        let mut stmt = self.conn.prepare("SELECT json FROM flows WHERE flow_id = ?1")?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT json FROM flows WHERE flow_id = ?1")?;
         let mut rows = stmt.query(params![flow_id])?;
         match rows.next()? {
-            Some(row) => Ok(Some(serde_json::from_str::<Flow>(&row.get::<_, String>(0)?)?)),
+            Some(row) => Ok(Some(serde_json::from_str::<Flow>(
+                &row.get::<_, String>(0)?,
+            )?)),
             None => Ok(None),
         }
     }
@@ -274,7 +284,13 @@ mod tests {
     use flowmint_model::{CaptureId, Endpoint, FlowId};
 
     fn endpoint(host: &str, port: u16) -> Endpoint {
-        Endpoint { host: Some(host.into()), ip: None, port, process_name: None, process_pid: None }
+        Endpoint {
+            host: Some(host.into()),
+            ip: None,
+            port,
+            process_name: None,
+            process_pid: None,
+        }
     }
 
     #[test]
@@ -294,13 +310,29 @@ mod tests {
         let cap = CaptureId::new();
         store.insert_capture(cap.as_str(), 0, Some("t")).unwrap();
 
-        let f1 = Flow::opened(FlowId::new(), cap.clone(), endpoint("client", 1), endpoint("example.com", 80), 10);
-        let f2 = Flow::opened(FlowId::new(), cap.clone(), endpoint("client", 2), endpoint("other.test", 80), 20);
+        let f1 = Flow::opened(
+            FlowId::new(),
+            cap.clone(),
+            endpoint("client", 1),
+            endpoint("example.com", 80),
+            10,
+        );
+        let f2 = Flow::opened(
+            FlowId::new(),
+            cap.clone(),
+            endpoint("client", 2),
+            endpoint("other.test", 80),
+            20,
+        );
         store.upsert_flow(&f1).unwrap();
         store.upsert_flow(&f2).unwrap();
 
         let hits = store
-            .search_flows(&SearchFilter { host: Some("example".into()), capture_id: None, limit: 10 })
+            .search_flows(&SearchFilter {
+                host: Some("example".into()),
+                capture_id: None,
+                limit: 10,
+            })
             .unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].host.as_deref(), Some("example.com"));

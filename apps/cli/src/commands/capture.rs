@@ -21,7 +21,10 @@ pub async fn start(
     if mitm {
         let (path, _) = engine.ensure_ca()?;
         println!("  HTTPS MITM: 开 — 客户端需信任 CA: {}", path.display());
-        println!("  (导出 CA: flowmint --data {} cert export)", data_dir.display());
+        println!(
+            "  (导出 CA: flowmint --data {} cert export)",
+            data_dir.display()
+        );
         if insecure_upstream {
             println!("  !! 已开启不校验上游 TLS（仅测试）");
         }

@@ -48,7 +48,9 @@ impl Redactor {
 
     /// True if a header value should be fully masked by its name.
     pub fn is_sensitive_header(&self, name: &str) -> bool {
-        SENSITIVE_HEADERS.iter().any(|h| name.eq_ignore_ascii_case(h))
+        SENSITIVE_HEADERS
+            .iter()
+            .any(|h| name.eq_ignore_ascii_case(h))
     }
 
     /// Mask a single header value if the name is sensitive.
@@ -79,7 +81,10 @@ mod tests {
         let r = Redactor::default();
         assert_eq!(r.header_value("Authorization", "Bearer abc"), MASK);
         assert_eq!(r.header_value("Cookie", "sid=1"), MASK);
-        assert_eq!(r.header_value("Accept", "application/json"), "application/json");
+        assert_eq!(
+            r.header_value("Accept", "application/json"),
+            "application/json"
+        );
 
         let body = r.text(r#"{"email":"a@b.com","jwt":"eyJhbGc.eyJzdWI.sig"}"#);
         assert!(body.contains(MASK));

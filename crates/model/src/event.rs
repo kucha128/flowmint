@@ -119,8 +119,14 @@ pub struct PayloadRef {
 pub enum DecodeStatus {
     #[default]
     NotAttempted,
-    Decoded { decoder: String, version: String },
-    Failed { decoder: String, reason: String },
+    Decoded {
+        decoder: String,
+        version: String,
+    },
+    Failed {
+        decoder: String,
+        reason: String,
+    },
 }
 
 /// Provenance of an event: which adapter produced it and with what code version
@@ -196,12 +202,16 @@ mod tests {
             CaptureId::new(),
             FlowId::new(),
             0,
-            Observed { wall_unix_ms: 1_700_000_000_000, monotonic_offset_ns: 42 },
+            Observed {
+                wall_unix_ms: 1_700_000_000_000,
+                monotonic_offset_ns: 42,
+            },
             Direction::ClientToServer,
             EventKind::HttpRequestHeaders,
         );
         ev.attributes.insert("http.method".into(), "GET".into());
-        ev.attributes.insert("http.path".into(), "/v1/profile".into());
+        ev.attributes
+            .insert("http.path".into(), "/v1/profile".into());
 
         let json = serde_json::to_string(&ev).unwrap();
         let back: NetworkEvent = serde_json::from_str(&json).unwrap();

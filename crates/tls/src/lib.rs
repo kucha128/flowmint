@@ -22,11 +22,11 @@ use rcgen::{
     KeyPair, KeyUsagePurpose, SanType,
 };
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
-use time::{Duration, OffsetDateTime};
 use rustls::server::ResolvesServerCert;
 use rustls::sign::CertifiedKey;
 use rustls::{ClientConfig, RootCertStore, ServerConfig};
 use thiserror::Error;
+use time::{Duration, OffsetDateTime};
 
 #[derive(Debug, Error)]
 pub enum TlsError {
@@ -68,13 +68,23 @@ impl CertAuthority {
             // the already-trusted ca.pem.
             let params = CertificateParams::from_ca_cert_pem(&ca_pem)?;
             let ca_cert = params.self_signed(&ca_key)?;
-            Ok(Self { ca_cert, ca_key, ca_pem, cache: Mutex::new(HashMap::new()) })
+            Ok(Self {
+                ca_cert,
+                ca_key,
+                ca_pem,
+                cache: Mutex::new(HashMap::new()),
+            })
         } else {
             let (ca_cert, ca_key) = Self::generate_ca()?;
             let ca_pem = ca_cert.pem();
             fs::write(&cert_path, &ca_pem)?;
             fs::write(&key_path, ca_key.serialize_pem())?;
-            Ok(Self { ca_cert, ca_key, ca_pem, cache: Mutex::new(HashMap::new()) })
+            Ok(Self {
+                ca_cert,
+                ca_key,
+                ca_pem,
+                cache: Mutex::new(HashMap::new()),
+            })
         }
     }
 
@@ -148,7 +158,10 @@ impl CertAuthority {
             .map_err(|_| TlsError::SigningKey)?;
 
         let certified = Arc::new(CertifiedKey::new(vec![cert_der], signing_key));
-        self.cache.lock().unwrap().insert(host.to_string(), certified.clone());
+        self.cache
+            .lock()
+            .unwrap()
+            .insert(host.to_string(), certified.clone());
         Ok(certified)
     }
 }

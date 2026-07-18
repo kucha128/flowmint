@@ -51,13 +51,25 @@ pub struct Match {
 #[serde(rename_all = "snake_case")]
 pub enum Action {
     Observe,
-    Tag { labels: Vec<String> },
-    Redact { fields: Vec<String> },
-    Delay { milliseconds: u64 },
-    Respond { status: u16, body: String },
+    Tag {
+        labels: Vec<String>,
+    },
+    Redact {
+        fields: Vec<String>,
+    },
+    Delay {
+        milliseconds: u64,
+    },
+    Respond {
+        status: u16,
+        body: String,
+    },
     /// RFC6902-style patch applied to a JSON body (`response.body` /
     /// `request.body`), per the design §3.3 example.
-    JsonPatch { target: String, operations: Vec<PatchOp> },
+    JsonPatch {
+        target: String,
+        operations: Vec<PatchOp>,
+    },
     Breakpoint,
     Record,
 }
@@ -82,7 +94,10 @@ pub struct Limits {
 impl Default for Limits {
     fn default() -> Self {
         // Conservative defaults; a rule that omits limits still cannot run away.
-        Self { max_body_bytes: 1 << 20, timeout_ms: 50 }
+        Self {
+            max_body_bytes: 1 << 20,
+            timeout_ms: 50,
+        }
     }
 }
 

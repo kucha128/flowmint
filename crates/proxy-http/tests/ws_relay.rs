@@ -31,7 +31,9 @@ impl FlowSink for TestSink {
 /// Minimal WebSocket echo server: canned 101 handshake, then echoes frames.
 async fn ws_echo_server(listener: TcpListener) {
     loop {
-        let Ok((mut sock, _)) = listener.accept().await else { return };
+        let Ok((mut sock, _)) = listener.accept().await else {
+            return;
+        };
         tokio::spawn(async move {
             // Drain the request head.
             let mut head = Vec::new();
@@ -51,8 +53,17 @@ async fn ws_echo_server(listener: TcpListener) {
             let _ = sock.flush().await;
 
             while let Ok(Some(frame)) = ws::read_frame(&mut sock).await {
-                let echo = ws::Frame { fin: true, opcode: frame.opcode, masked: false, payload: frame.payload };
-                if sock.write_all(&ws::encode_frame(&echo, None)).await.is_err() {
+                let echo = ws::Frame {
+                    fin: true,
+                    opcode: frame.opcode,
+                    masked: false,
+                    payload: frame.payload,
+                };
+                if sock
+                    .write_all(&ws::encode_frame(&echo, None))
+                    .await
+                    .is_err()
+                {
                     break;
                 }
                 let _ = sock.flush().await;
@@ -72,7 +83,9 @@ async fn ws_frames_are_captured_through_proxy() {
     tokio::spawn(ws_echo_server(echo_listener));
 
     // Proxy on a random port.
-    let sink = Arc::new(TestSink { events: Mutex::new(Vec::new()) });
+    let sink = Arc::new(TestSink {
+        events: Mutex::new(Vec::new()),
+    });
     let ctx = ProxyContext {
         sink: sink.clone(),
         capture_id: CaptureId::new(),
@@ -107,11 +120,23 @@ async fn ws_frames_are_captured_through_proxy() {
             break;
         }
     }
-    assert!(String::from_utf8_lossy(&head).contains("101"), "expected 101, got {:?}", String::from_utf8_lossy(&head));
+    assert!(
+        String::from_utf8_lossy(&head).contains("101"),
+        "expected 101, got {:?}",
+        String::from_utf8_lossy(&head)
+    );
 
     // Send a masked text frame; expect it echoed back.
-    let frame = ws::Frame { fin: true, opcode: ws::Opcode::Text, masked: true, payload: b"ping".to_vec() };
-    client.write_all(&ws::encode_frame(&frame, Some([9, 8, 7, 6]))).await.unwrap();
+    let frame = ws::Frame {
+        fin: true,
+        opcode: ws::Opcode::Text,
+        masked: true,
+        payload: b"ping".to_vec(),
+    };
+    client
+        .write_all(&ws::encode_frame(&frame, Some([9, 8, 7, 6])))
+        .await
+        .unwrap();
     client.flush().await.unwrap();
 
     let echoed = ws::read_frame(&mut client).await.unwrap().unwrap();
@@ -120,10 +145,18 @@ async fn ws_frames_are_captured_through_proxy() {
     // Let the proxy record.
     tokio::time::sleep(Duration::from_millis(150)).await;
     let events = sink.events.lock().unwrap();
-    let ws_frames = events.iter().filter(|e| matches!(e.kind, EventKind::WebSocketFrame)).count();
-    assert!(ws_frames >= 2, "expected >=2 WebSocketFrame events, got {ws_frames}");
+    let ws_frames = events
+        .iter()
+        .filter(|e| matches!(e.kind, EventKind::WebSocketFrame))
+        .count();
     assert!(
-        events.iter().any(|e| e.attributes.get("ws.opcode").and_then(|v| v.as_str()) == Some("text")),
+        ws_frames >= 2,
+        "expected >=2 WebSocketFrame events, got {ws_frames}"
+    );
+    assert!(
+        events
+            .iter()
+            .any(|e| e.attributes.get("ws.opcode").and_then(|v| v.as_str()) == Some("text")),
         "expected a text frame event"
     );
 }

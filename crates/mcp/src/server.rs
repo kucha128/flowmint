@@ -21,31 +21,44 @@ pub fn serve_stdio(engine: Engine) -> io::Result<()> {
         if line.trim().is_empty() {
             continue;
         }
-        let Ok(req) = serde_json::from_str::<Value>(&line) else { continue };
+        let Ok(req) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
         let id = req.get("id").cloned();
         let method = req.get("method").and_then(|m| m.as_str()).unwrap_or("");
 
         let response = match method {
-            "initialize" => Some(ok(id, json!({
-                "protocolVersion": "2024-11-05",
-                "capabilities": { "tools": {} },
-                "serverInfo": { "name": "flowmint-mcp", "version": env!("CARGO_PKG_VERSION") },
-            }))),
+            "initialize" => Some(ok(
+                id,
+                json!({
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": { "tools": {} },
+                    "serverInfo": { "name": "flowmint-mcp", "version": env!("CARGO_PKG_VERSION") },
+                }),
+            )),
             "notifications/initialized" | "notifications/cancelled" => None,
             "tools/list" => Some(ok(id, json!({ "tools": tool_specs() }))),
             "tools/call" => {
                 let params = req.get("params").cloned().unwrap_or_else(|| json!({}));
                 let name = params.get("name").and_then(|n| n.as_str()).unwrap_or("");
-                let args = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
+                let args = params
+                    .get("arguments")
+                    .cloned()
+                    .unwrap_or_else(|| json!({}));
                 match dispatch(&mcp, name, &args) {
-                    Ok(data) => Some(ok(id, json!({
-                        "content": [ { "type": "text", "text": serde_json::to_string(&data).unwrap_or_default() } ],
-                        "isError": false,
-                    }))),
+                    Ok(data) => Some(ok(
+                        id,
+                        json!({
+                            "content": [ { "type": "text", "text": serde_json::to_string(&data).unwrap_or_default() } ],
+                            "isError": false,
+                        }),
+                    )),
                     Err(e) => Some(err(id, -32000, &e.to_string())),
                 }
             }
-            _ => id.as_ref().map(|_| err(id.clone(), -32601, "method not found")),
+            _ => id
+                .as_ref()
+                .map(|_| err(id.clone(), -32601, "method not found")),
         };
 
         if let Some(resp) = response {
@@ -62,9 +75,9 @@ fn dispatch(mcp: &Mcp, name: &str, args: &Value) -> crate::Result<Value> {
     match name {
         "flowmint_list_captures" => mcp.list_captures(),
         "flowmint_search_flows" => mcp.search_flows(s("host"), n("limit").unwrap_or(50)),
-        "flowmint_get_flow" => {
-            mcp.get_flow(&s("flow_id").ok_or_else(|| crate::McpError::NotFound("flow_id required".into()))?)
-        }
+        "flowmint_get_flow" => mcp.get_flow(
+            &s("flow_id").ok_or_else(|| crate::McpError::NotFound("flow_id required".into()))?,
+        ),
         "flowmint_get_payload_range" => mcp.get_payload_range(
             &s("flow_id").ok_or_else(|| crate::McpError::NotFound("flow_id required".into()))?,
             &s("which").unwrap_or_else(|| "response".into()),

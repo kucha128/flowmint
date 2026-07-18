@@ -102,7 +102,10 @@ pub fn matches(rule: &Rule, ex: &HttpExchange) -> bool {
 /// Apply `rule` to `ex` in place, returning a [`Decision`]. If the rule does not
 /// match, `ex` is untouched and `matched` is false.
 pub fn apply(rule: &Rule, ex: &mut HttpExchange) -> Decision {
-    let mut d = Decision { rule_id: rule.id.clone(), ..Default::default() };
+    let mut d = Decision {
+        rule_id: rule.id.clone(),
+        ..Default::default()
+    };
     if !matches(rule, ex) {
         return d;
     }
@@ -124,7 +127,8 @@ pub fn apply(rule: &Rule, ex: &mut HttpExchange) -> Decision {
             Action::Redact { fields } => {
                 d.actions_applied.push("redact".into());
                 for f in fields {
-                    if redact_header(&mut ex.req_headers, f) || redact_header(&mut ex.resp_headers, f)
+                    if redact_header(&mut ex.req_headers, f)
+                        || redact_header(&mut ex.resp_headers, f)
                     {
                         d.redacted.push(f.clone());
                     }
@@ -132,22 +136,32 @@ pub fn apply(rule: &Rule, ex: &mut HttpExchange) -> Decision {
             }
             Action::Respond { status, body } => {
                 d.actions_applied.push("respond".into());
-                d.short_circuit = Some(SyntheticResponse { status: *status, body: body.clone() });
+                d.short_circuit = Some(SyntheticResponse {
+                    status: *status,
+                    body: body.clone(),
+                });
                 ex.status = Some(*status);
                 ex.resp_body = body.clone().into_bytes();
             }
             Action::JsonPatch { target, operations } => {
                 d.actions_applied.push("json_patch".into());
                 let is_request = target.contains("request");
-                let body = if is_request { &ex.req_body } else { &ex.resp_body };
+                let body = if is_request {
+                    &ex.req_body
+                } else {
+                    &ex.resp_body
+                };
                 if body.len() as u64 > rule.limits.max_body_bytes {
-                    d.errors.push(format!("{target}: body exceeds max_body_bytes"));
+                    d.errors
+                        .push(format!("{target}: body exceeds max_body_bytes"));
                     continue;
                 }
                 match serde_json::from_slice::<Value>(body) {
                     Ok(mut root) => {
                         for op in operations {
-                            if let Err(e) = apply_patch_op(&mut root, &op.op, &op.path, op.value.clone()) {
+                            if let Err(e) =
+                                apply_patch_op(&mut root, &op.op, &op.path, op.value.clone())
+                            {
                                 d.errors.push(format!("{target} {}: {e}", op.path));
                             }
                         }
@@ -178,7 +192,12 @@ fn redact_header(headers: &mut [(String, String)], field: &str) -> bool {
 }
 
 /// Apply one JSON patch op (subset of RFC 6902: replace/add/remove).
-fn apply_patch_op(root: &mut Value, op: &str, pointer: &str, value: Option<Value>) -> Result<(), String> {
+fn apply_patch_op(
+    root: &mut Value,
+    op: &str,
+    pointer: &str,
+    value: Option<Value>,
+) -> Result<(), String> {
     match op {
         "replace" => {
             let target = root.pointer_mut(pointer).ok_or("path not found")?;
@@ -250,16 +269,44 @@ pub fn diff(before: &HttpExchange, after: &HttpExchange) -> Vec<Change> {
             after: after.status.map(|s| s.to_string()),
         });
     }
-    diff_headers("request.headers", &before.req_headers, &after.req_headers, &mut changes);
-    diff_headers("response.headers", &before.resp_headers, &after.resp_headers, &mut changes);
-    diff_body("request.body", &before.req_body, &after.req_body, &mut changes);
-    diff_body("response.body", &before.resp_body, &after.resp_body, &mut changes);
+    diff_headers(
+        "request.headers",
+        &before.req_headers,
+        &after.req_headers,
+        &mut changes,
+    );
+    diff_headers(
+        "response.headers",
+        &before.resp_headers,
+        &after.resp_headers,
+        &mut changes,
+    );
+    diff_body(
+        "request.body",
+        &before.req_body,
+        &after.req_body,
+        &mut changes,
+    );
+    diff_body(
+        "response.body",
+        &before.resp_body,
+        &after.resp_body,
+        &mut changes,
+    );
     changes
 }
 
-fn diff_headers(prefix: &str, before: &[(String, String)], after: &[(String, String)], out: &mut Vec<Change>) {
+fn diff_headers(
+    prefix: &str,
+    before: &[(String, String)],
+    after: &[(String, String)],
+    out: &mut Vec<Change>,
+) {
     for (k, bv) in before {
-        let av = after.iter().find(|(ak, _)| ak.eq_ignore_ascii_case(k)).map(|(_, v)| v);
+        let av = after
+            .iter()
+            .find(|(ak, _)| ak.eq_ignore_ascii_case(k))
+            .map(|(_, v)| v);
         match av {
             Some(av) if av != bv => out.push(Change {
                 location: format!("{prefix}.{k}"),
@@ -275,7 +322,10 @@ fn diff_body(prefix: &str, before: &[u8], after: &[u8], out: &mut Vec<Change>) {
     if before == after {
         return;
     }
-    match (serde_json::from_slice::<Value>(before), serde_json::from_slice::<Value>(after)) {
+    match (
+        serde_json::from_slice::<Value>(before),
+        serde_json::from_slice::<Value>(after),
+    ) {
         (Ok(b), Ok(a)) => diff_json(prefix, &b, &a, out),
         _ => out.push(Change {
             location: prefix.into(),
@@ -298,8 +348,16 @@ fn diff_json(path: &str, before: &Value, after: &Value, out: &mut Vec<Change>) {
                 let child = format!("{path}/{k}");
                 match (b.get(k), a.get(k)) {
                     (Some(bv), Some(av)) => diff_json(&child, bv, av, out),
-                    (Some(bv), None) => out.push(Change { location: child, before: Some(bv.to_string()), after: None }),
-                    (None, Some(av)) => out.push(Change { location: child, before: None, after: Some(av.to_string()) }),
+                    (Some(bv), None) => out.push(Change {
+                        location: child,
+                        before: Some(bv.to_string()),
+                        after: None,
+                    }),
+                    (None, Some(av)) => out.push(Change {
+                        location: child,
+                        before: None,
+                        after: Some(av.to_string()),
+                    }),
                     (None, None) => {}
                 }
             }
@@ -323,7 +381,12 @@ mod tests {
             id: "r1".into(),
             name: "test".into(),
             version: "1.0.0".into(),
-            r#match: Match { host: Some("api.example.test".into()), method: Some("GET".into()), path: Some("/v1/profile".into()), ..Default::default() },
+            r#match: Match {
+                host: Some("api.example.test".into()),
+                method: Some("GET".into()),
+                path: Some("/v1/profile".into()),
+                ..Default::default()
+            },
             actions: vec![],
             limits: Default::default(),
             scope: Default::default(),
@@ -334,7 +397,8 @@ mod tests {
 
     fn profile_exchange() -> HttpExchange {
         let mut ex = HttpExchange::request("GET", "api.example.test", "/v1/profile");
-        ex.req_headers.push(("Authorization".into(), "Bearer abc".into()));
+        ex.req_headers
+            .push(("Authorization".into(), "Bearer abc".into()));
         ex.status = Some(200);
         ex.resp_body = br#"{"features":{"experimental":false},"name":"a"}"#.to_vec();
         ex
@@ -344,7 +408,9 @@ mod tests {
     fn json_patch_replace_and_redact_match_design_example() {
         let mut rule = base_rule();
         rule.actions = vec![
-            Action::Redact { fields: vec!["authorization".into()] },
+            Action::Redact {
+                fields: vec!["authorization".into()],
+            },
             Action::JsonPatch {
                 target: "response.body".into(),
                 operations: vec![PatchOp {
@@ -368,9 +434,13 @@ mod tests {
         assert_eq!(after.req_headers[0].1, REDACTED);
 
         let changes = diff(&before, &after);
-        assert!(changes.iter().any(|c| c.location == "response.body/features/experimental"
-            && c.after.as_deref() == Some("true")));
-        assert!(changes.iter().any(|c| c.location == "request.headers.Authorization"));
+        assert!(changes
+            .iter()
+            .any(|c| c.location == "response.body/features/experimental"
+                && c.after.as_deref() == Some("true")));
+        assert!(changes
+            .iter()
+            .any(|c| c.location == "request.headers.Authorization"));
     }
 
     #[test]
@@ -384,7 +454,10 @@ mod tests {
     #[test]
     fn respond_short_circuits() {
         let mut rule = base_rule();
-        rule.actions = vec![Action::Respond { status: 503, body: "{\"down\":true}".into() }];
+        rule.actions = vec![Action::Respond {
+            status: 503,
+            body: "{\"down\":true}".into(),
+        }];
         let mut ex = profile_exchange();
         let d = apply(&rule, &mut ex);
         assert_eq!(d.short_circuit.as_ref().unwrap().status, 503);
@@ -396,7 +469,11 @@ mod tests {
         let mut rule = base_rule();
         rule.actions = vec![Action::JsonPatch {
             target: "response.body".into(),
-            operations: vec![PatchOp { op: "replace".into(), path: "/x".into(), value: Some(serde_json::json!(1)) }],
+            operations: vec![PatchOp {
+                op: "replace".into(),
+                path: "/x".into(),
+                value: Some(serde_json::json!(1)),
+            }],
         }];
         let mut ex = profile_exchange();
         ex.resp_body = b"not json".to_vec();

@@ -74,7 +74,12 @@ struct ReqInfo {
 impl FfiSink {
     fn body_of(&self, event: &NetworkEvent) -> Vec<u8> {
         match &event.payload {
-            Some(p) => self.bodies.lock().unwrap().remove(&p.sha256).unwrap_or_default(),
+            Some(p) => self
+                .bodies
+                .lock()
+                .unwrap()
+                .remove(&p.sha256)
+                .unwrap_or_default(),
             None => Vec::new(),
         }
     }
@@ -86,14 +91,27 @@ impl FlowSink for FfiSink {
     fn put_payload(&self, bytes: &[u8], _redaction: RedactionState) -> Option<PayloadRef> {
         // 用自增 id 作为 key（也放进 PayloadRef.sha256，record_event 据此取回）。
         let key = NEXT_ID.fetch_add(1, Ordering::Relaxed).to_string();
-        self.bodies.lock().unwrap().insert(key.clone(), bytes.to_vec());
-        Some(PayloadRef { sha256: key, length: bytes.len() as u64, redaction: RedactionState::None, locator: String::new() })
+        self.bodies
+            .lock()
+            .unwrap()
+            .insert(key.clone(), bytes.to_vec());
+        Some(PayloadRef {
+            sha256: key,
+            length: bytes.len() as u64,
+            redaction: RedactionState::None,
+            locator: String::new(),
+        })
     }
 
     fn record_event(&self, event: NetworkEvent) {
         let Some(cb) = self.target.cb else { return };
         let user = self.target.user;
-        let https = event.protocol_stack.tls.as_ref().map(|t| t.decrypted).unwrap_or(false);
+        let https = event
+            .protocol_stack
+            .tls
+            .as_ref()
+            .map(|t| t.decrypted)
+            .unwrap_or(false);
 
         match event.kind {
             EventKind::HttpRequestHeaders => {
@@ -102,21 +120,48 @@ impl FlowSink for FfiSink {
                 let path = attr(&event, "http.path");
                 self.requests.lock().unwrap().insert(
                     event.flow_id.to_string(),
-                    ReqInfo { method: method.clone(), host: host.clone(), path: path.clone(), https },
+                    ReqInfo {
+                        method: method.clone(),
+                        host: host.clone(),
+                        path: path.clone(),
+                        https,
+                    },
                 );
                 let url = format!("{}://{host}{path}", if https { "https" } else { "http" });
                 fire(cb, user, 0, &method, &url, &host, -1, &self.body_of(&event));
             }
             EventKind::HttpResponseHeaders => {
-                let status = event.attributes.get("http.status").and_then(|v| v.as_i64()).unwrap_or(-1) as i32;
-                let (method, url, host) = match self.requests.lock().unwrap().remove(&event.flow_id.to_string()) {
+                let status = event
+                    .attributes
+                    .get("http.status")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(-1) as i32;
+                let (method, url, host) = match self
+                    .requests
+                    .lock()
+                    .unwrap()
+                    .remove(&event.flow_id.to_string())
+                {
                     Some(ri) => {
                         let scheme = if ri.https { "https" } else { "http" };
-                        (ri.method, format!("{scheme}://{}{}", ri.host, ri.path), ri.host)
+                        (
+                            ri.method,
+                            format!("{scheme}://{}{}", ri.host, ri.path),
+                            ri.host,
+                        )
                     }
                     None => (String::new(), String::new(), String::new()),
                 };
-                fire(cb, user, 1, &method, &url, &host, status, &self.body_of(&event));
+                fire(
+                    cb,
+                    user,
+                    1,
+                    &method,
+                    &url,
+                    &host,
+                    status,
+                    &self.body_of(&event),
+                );
             }
             _ => {}
         }
@@ -124,11 +169,25 @@ impl FlowSink for FfiSink {
 }
 
 fn attr(event: &NetworkEvent, key: &str) -> String {
-    event.attributes.get(key).and_then(|v| v.as_str()).unwrap_or_default().to_string()
+    event
+        .attributes
+        .get(key)
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string()
 }
 
 #[allow(clippy::too_many_arguments)]
-fn fire(cb: FmHttpCallback, user: *mut c_void, kind: i32, method: &str, url: &str, host: &str, status: i32, body: &[u8]) {
+fn fire(
+    cb: FmHttpCallback,
+    user: *mut c_void,
+    kind: i32,
+    method: &str,
+    url: &str,
+    host: &str,
+    status: i32,
+    body: &[u8],
+) {
     let ev = FmHttpEvent {
         kind,
         method: cstr(method),
@@ -196,15 +255,24 @@ impl FmInterceptMsg {
             1 => {
                 let mut headers = self.orig_headers;
                 for (name, value) in self.header_sets {
-                    match headers.iter_mut().find(|(k, _)| k.eq_ignore_ascii_case(&name)) {
+                    match headers
+                        .iter_mut()
+                        .find(|(k, _)| k.eq_ignore_ascii_case(&name))
+                    {
                         Some(h) => h.1 = value,
                         None => headers.push((name, value)),
                     }
                 }
-                let status = self
-                    .new_status
-                    .or(if self.is_response && self.status >= 0 { Some(self.status as u16) } else { None });
-                Decision::Modify(Edit { status, headers, body: self.new_body.unwrap_or(self.body) })
+                let status = self.new_status.or(if self.is_response && self.status >= 0 {
+                    Some(self.status as u16)
+                } else {
+                    None
+                });
+                Decision::Modify(Edit {
+                    status,
+                    headers,
+                    body: self.new_body.unwrap_or(self.body),
+                })
             }
             _ => Decision::Continue,
         }
@@ -256,7 +324,9 @@ pub unsafe extern "C" fn fm_intercept_is_response(msg: *const FmInterceptMsg) ->
 
 #[no_mangle]
 pub unsafe extern "C" fn fm_intercept_method(msg: *const FmInterceptMsg) -> *const c_char {
-    msg.as_ref().map(|m| m.method.as_ptr()).unwrap_or(ptr::null())
+    msg.as_ref()
+        .map(|m| m.method.as_ptr())
+        .unwrap_or(ptr::null())
 }
 
 #[no_mangle]
@@ -294,9 +364,17 @@ pub unsafe extern "C" fn fm_intercept_body(
 
 /// 改写 Body（拷贝 `len` 字节）。需回调返回 1 才生效。
 #[no_mangle]
-pub unsafe extern "C" fn fm_intercept_set_body(msg: *mut FmInterceptMsg, data: *const u8, len: usize) {
+pub unsafe extern "C" fn fm_intercept_set_body(
+    msg: *mut FmInterceptMsg,
+    data: *const u8,
+    len: usize,
+) {
     if let Some(m) = msg.as_mut() {
-        let bytes = if data.is_null() || len == 0 { Vec::new() } else { slice::from_raw_parts(data, len).to_vec() };
+        let bytes = if data.is_null() || len == 0 {
+            Vec::new()
+        } else {
+            slice::from_raw_parts(data, len).to_vec()
+        };
         m.new_body = Some(bytes);
     }
 }
@@ -319,8 +397,13 @@ pub unsafe extern "C" fn fm_intercept_set_header(
     name: *const c_char,
     value: *const c_char,
 ) {
-    let (Some(m), false, false) = (msg.as_mut(), name.is_null(), value.is_null()) else { return };
-    if let (Ok(n), Ok(v)) = (CStr::from_ptr(name).to_str(), CStr::from_ptr(value).to_str()) {
+    let (Some(m), false, false) = (msg.as_mut(), name.is_null(), value.is_null()) else {
+        return;
+    };
+    if let (Ok(n), Ok(v)) = (
+        CStr::from_ptr(name).to_str(),
+        CStr::from_ptr(value).to_str(),
+    ) {
         m.header_sets.push((n.to_string(), v.to_string()));
     }
 }
@@ -355,8 +438,14 @@ pub extern "C" fn fm_context_new() -> *mut FmContext {
         mitm: false,
         insecure_upstream: false,
         data_dir: "flowmint-data".to_string(),
-        target: CallbackTarget { cb: None, user: ptr::null_mut() },
-        intercept: InterceptTarget { cb: None, user: ptr::null_mut() },
+        target: CallbackTarget {
+            cb: None,
+            user: ptr::null_mut(),
+        },
+        intercept: InterceptTarget {
+            cb: None,
+            user: ptr::null_mut(),
+        },
         runtime: None,
         handle: None,
         error: CString::default(),
@@ -400,7 +489,11 @@ pub unsafe extern "C" fn fm_set_data_dir(ctx: *mut FmContext, dir: *const c_char
 
 /// 注册 HTTP 回调（传 NULL 清除）。必须在 `fm_start` 之前调用。
 #[no_mangle]
-pub unsafe extern "C" fn fm_set_http_callback(ctx: *mut FmContext, cb: Option<FmHttpCallback>, user: *mut c_void) {
+pub unsafe extern "C" fn fm_set_http_callback(
+    ctx: *mut FmContext,
+    cb: Option<FmHttpCallback>,
+    user: *mut c_void,
+) {
     if let Some(c) = ctx.as_mut() {
         c.target = CallbackTarget { cb, user };
     }
@@ -411,7 +504,10 @@ pub unsafe extern "C" fn fm_set_http_callback(ctx: *mut FmContext, cb: Option<Fm
 pub unsafe extern "C" fn fm_start(ctx: *mut FmContext) -> bool {
     let Some(c) = ctx.as_mut() else { return false };
 
-    let rt = match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
+    let rt = match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    {
         Ok(rt) => rt,
         Err(e) => {
             c.set_error(format!("创建运行时失败: {e}"));
@@ -446,10 +542,23 @@ pub unsafe extern "C" fn fm_start(ctx: *mut FmContext) -> bool {
         requests: Mutex::new(HashMap::new()),
     });
     let hook: Option<Arc<dyn InterceptHook>> = match c.intercept.cb {
-        Some(cb) => Some(Arc::new(FfiInterceptHook { cb, user: c.intercept.user })),
+        Some(cb) => Some(Arc::new(FfiInterceptHook {
+            cb,
+            user: c.intercept.user,
+        })),
         None => None,
     };
-    let pctx = ProxyContext { sink, capture_id: CaptureId::new(), clock: Clock::start_now(), mitm, hook, upstream_proxy: None, proxy_port: 0, ca_pem: None, ca_der: None };
+    let pctx = ProxyContext {
+        sink,
+        capture_id: CaptureId::new(),
+        clock: Clock::start_now(),
+        mitm,
+        hook,
+        upstream_proxy: None,
+        proxy_port: 0,
+        ca_pem: None,
+        ca_der: None,
+    };
     let handle = rt.spawn(flowmint_proxy_http::serve(listener, pctx));
 
     c.runtime = Some(rt);
@@ -486,7 +595,9 @@ pub unsafe extern "C" fn fm_export_ca(ctx: *mut FmContext, out_path: *const c_ch
     if out_path.is_null() {
         return false;
     }
-    let Ok(path) = CStr::from_ptr(out_path).to_str() else { return false };
+    let Ok(path) = CStr::from_ptr(out_path).to_str() else {
+        return false;
+    };
     match CertAuthority::load_or_create(Path::new(&c.data_dir).join("ca")) {
         Ok(ca) => std::fs::write(path, ca.ca_pem()).is_ok(),
         Err(e) => {
@@ -503,7 +614,9 @@ pub extern "C" fn fm_version() -> *const c_char {
 }
 
 fn build_mitm(data_dir: &str, insecure: bool) -> Result<MitmConfig, flowmint_tls::TlsError> {
-    let ca = Arc::new(CertAuthority::load_or_create(Path::new(data_dir).join("ca"))?);
+    let ca = Arc::new(CertAuthority::load_or_create(
+        Path::new(data_dir).join("ca"),
+    )?);
     let client_config = if insecure {
         flowmint_tls::insecure_upstream_client_config()?
     } else {
@@ -523,7 +636,9 @@ pub unsafe extern "C" fn fm_http_event_type(ev: *const FmHttpEvent) -> i32 {
 
 #[no_mangle]
 pub unsafe extern "C" fn fm_http_event_method(ev: *const FmHttpEvent) -> *const c_char {
-    ev.as_ref().map(|e| e.method.as_ptr()).unwrap_or(ptr::null())
+    ev.as_ref()
+        .map(|e| e.method.as_ptr())
+        .unwrap_or(ptr::null())
 }
 
 #[no_mangle]
@@ -543,7 +658,10 @@ pub unsafe extern "C" fn fm_http_event_status(ev: *const FmHttpEvent) -> i32 {
 
 /// 返回 Body 指针并写出长度；指针仅在回调期间有效。
 #[no_mangle]
-pub unsafe extern "C" fn fm_http_event_body(ev: *const FmHttpEvent, out_len: *mut usize) -> *const u8 {
+pub unsafe extern "C" fn fm_http_event_body(
+    ev: *const FmHttpEvent,
+    out_len: *mut usize,
+) -> *const u8 {
     match ev.as_ref() {
         Some(e) => {
             if !out_len.is_null() {

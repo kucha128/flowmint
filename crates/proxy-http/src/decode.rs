@@ -13,7 +13,9 @@ const MAX_DECODED: usize = 64 * 1024 * 1024;
 /// 以及逗号分隔的多重编码（按从右到左的顺序逐层解开）。
 /// `identity`、未知编码、空值或解压失败时，原样返回。
 pub fn decode_body(content_encoding: Option<&str>, data: &[u8]) -> Vec<u8> {
-    let Some(enc) = content_encoding else { return data.to_vec() };
+    let Some(enc) = content_encoding else {
+        return data.to_vec();
+    };
     // 多重编码如 "gzip, br"：应用顺序与书写顺序相反，逐层剥离。
     let mut out = data.to_vec();
     for token in enc.split(',').rev() {
@@ -66,7 +68,10 @@ struct LimitedSink<'a>(&'a mut Vec<u8>);
 impl std::io::Write for LimitedSink<'_> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         if self.0.len() + buf.len() > MAX_DECODED {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "解压结果超过上限"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "解压结果超过上限",
+            ));
         }
         self.0.extend_from_slice(buf);
         Ok(buf.len())

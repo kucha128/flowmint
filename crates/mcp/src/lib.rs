@@ -39,7 +39,10 @@ pub struct Mcp {
 
 impl Mcp {
     pub fn new(engine: Engine) -> Self {
-        Self { engine, redactor: Redactor::default() }
+        Self {
+            engine,
+            redactor: Redactor::default(),
+        }
     }
 
     fn envelope(&self, data: Value, evidence_ids: Vec<String>) -> Value {
@@ -64,9 +67,11 @@ impl Mcp {
 
     /// `flowmint_search_flows` — metadata + minimal evidence, never bodies.
     pub fn search_flows(&self, host: Option<String>, limit: usize) -> Result<Value> {
-        let flows = self
-            .engine
-            .search_flows(&SearchFilter { host, capture_id: None, limit })?;
+        let flows = self.engine.search_flows(&SearchFilter {
+            host,
+            capture_id: None,
+            limit,
+        })?;
         let data: Vec<Value> = flows
             .iter()
             .map(|f| {
@@ -191,7 +196,12 @@ impl Mcp {
             .iter()
             .map(|e| e.event_id.to_string())
             .collect();
-        evidence.extend(self.engine.events_for_flow(b)?.iter().map(|e| e.event_id.to_string()));
+        evidence.extend(
+            self.engine
+                .events_for_flow(b)?
+                .iter()
+                .map(|e| e.event_id.to_string()),
+        );
         Ok(self.envelope(json!(data), evidence))
     }
 

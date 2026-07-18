@@ -81,7 +81,12 @@ impl Engine {
     // --- 断点改包（design §9 Breakpoint Editor）------------------------
 
     /// 配置断点：开关、主机过滤（URL 子串）、是否也拦截响应。
-    pub fn set_breakpoints(&self, enabled: bool, host_filter: Option<String>, break_response: bool) {
+    pub fn set_breakpoints(
+        &self,
+        enabled: bool,
+        host_filter: Option<String>,
+        break_response: bool,
+    ) {
         self.interceptor.set(enabled, host_filter, break_response);
     }
 
@@ -134,10 +139,11 @@ impl Engine {
         let clock = Clock::start_now();
         let capture_id = flowmint_model::CaptureId::new();
         let started_ms = clock.stamp().wall_unix_ms;
-        self.store
-            .lock()
-            .unwrap()
-            .insert_capture(capture_id.as_str(), started_ms, label.as_deref())?;
+        self.store.lock().unwrap().insert_capture(
+            capture_id.as_str(),
+            started_ms,
+            label.as_deref(),
+        )?;
 
         // 无论是否 MITM 都备好 CA（生成很廉价），落地页要用它下载证书。
         let ca = Arc::new(flowmint_tls::CertAuthority::load_or_create(self.ca_dir())?);
@@ -151,13 +157,19 @@ impl Engine {
             } else {
                 flowmint_tls::upstream_client_config()?
             };
-            Some(Arc::new(MitmConfig { ca: ca.clone(), client_config }))
+            Some(Arc::new(MitmConfig {
+                ca: ca.clone(),
+                client_config,
+            }))
         } else {
             None
         };
 
         let ctx = ProxyContext {
-            sink: Arc::new(StoreSink { store: self.store.clone(), live: self.live.clone() }),
+            sink: Arc::new(StoreSink {
+                store: self.store.clone(),
+                live: self.live.clone(),
+            }),
             capture_id,
             clock,
             mitm: mitm_cfg,
@@ -206,7 +218,9 @@ impl Engine {
     pub fn flow_detail(&self, flow_id: &str) -> Result<Option<serde_json::Value>> {
         use serde_json::json;
         const MAX_BODY: usize = 2 * 1024 * 1024;
-        let Some(flow) = self.get_flow(flow_id)? else { return Ok(None) };
+        let Some(flow) = self.get_flow(flow_id)? else {
+            return Ok(None);
+        };
         let mut events = Vec::new();
         for ev in self.events_for_flow(flow_id)? {
             let headers = ev
@@ -226,8 +240,7 @@ impl Engine {
                     match std::str::from_utf8(shown) {
                         Ok(s) => (json!(s), bytes.len(), false),
                         Err(_) => {
-                            let hex: String =
-                                shown.iter().map(|b| format!("{b:02x}")).collect();
+                            let hex: String = shown.iter().map(|b| format!("{b:02x}")).collect();
                             (json!(hex), bytes.len(), true)
                         }
                     }
@@ -247,7 +260,9 @@ impl Engine {
                 "tls": ev.protocol_stack.tls,
             }));
         }
-        Ok(Some(json!({ "flow": serde_json::to_value(&flow)?, "events": events })))
+        Ok(Some(
+            json!({ "flow": serde_json::to_value(&flow)?, "events": events }),
+        ))
     }
 
     /// 发送一条请求（重放 / 构造器）。解析 URL，按需建 TLS，返回响应 JSON。
@@ -276,17 +291,30 @@ impl Engine {
         .await?;
         // 把这次手动发送也记入抓包列表（写库 + 广播），与代理抓到的流量并列。
         self.record_manual_send(
-            method, &host, port, &path, https, &headers, &body,
-            Some(r.status), &r.headers, &r.body,
+            method,
+            &host,
+            port,
+            &path,
+            https,
+            &headers,
+            &body,
+            Some(r.status),
+            &r.headers,
+            &r.body,
         );
         // 与检查器一致：按响应头的 Content-Encoding 解压后再判定文本/二进制。
-        let enc = r.headers.iter()
+        let enc = r
+            .headers
+            .iter()
             .find(|(k, _)| k.eq_ignore_ascii_case("content-encoding"))
             .map(|(_, v)| v.clone());
         let body = flowmint_proxy_http::decode::decode_body(enc.as_deref(), &r.body);
         let (body_val, is_binary) = match std::str::from_utf8(&body) {
             Ok(s) => (json!(s), false),
-            Err(_) => (json!(body.iter().map(|b| format!("{b:02x}")).collect::<String>()), true),
+            Err(_) => (
+                json!(body.iter().map(|b| format!("{b:02x}")).collect::<String>()),
+                true,
+            ),
         };
         Ok(json!({
             "status": r.status,
@@ -337,10 +365,21 @@ impl Engine {
             }
         };
         let clock = Clock::start_now();
-        let sink = StoreSink { store: self.store.clone(), live: self.live.clone() };
+        let sink = StoreSink {
+            store: self.store.clone(),
+            live: self.live.clone(),
+        };
 
-        let client_ep = Endpoint { ip: Some("127.0.0.1".into()), port: 0, ..Default::default() };
-        let server_ep = Endpoint { host: Some(host.to_string()), port, ..Default::default() };
+        let client_ep = Endpoint {
+            ip: Some("127.0.0.1".into()),
+            port: 0,
+            ..Default::default()
+        };
+        let server_ep = Endpoint {
+            host: Some(host.to_string()),
+            port,
+            ..Default::default()
+        };
         let tls_info = https.then(|| TlsInfo {
             sni: Some(host.to_string()),
             alpn: None,
@@ -369,38 +408,61 @@ impl Engine {
         flow.closed_at_ms = Some(clock.stamp().wall_unix_ms);
         sink.upsert_flow(flow);
 
-        let stack = ProtocolStack { l4: "tcp".into(), tls: tls_info, l7: Some("http/1.1".into()) };
-        let evidence = EvidenceRef { adapter: "composer".into(), decoder_version: None };
+        let stack = ProtocolStack {
+            l4: "tcp".into(),
+            tls: tls_info,
+            l7: Some("http/1.1".into()),
+        };
+        let evidence = EvidenceRef {
+            adapter: "composer".into(),
+            decoder_version: None,
+        };
 
         let mut req_ev = NetworkEvent::new(
-            capture_id.clone(), flow_id.clone(), 0, clock.stamp(),
-            Direction::ClientToServer, EventKind::HttpRequestHeaders,
+            capture_id.clone(),
+            flow_id.clone(),
+            0,
+            clock.stamp(),
+            Direction::ClientToServer,
+            EventKind::HttpRequestHeaders,
         );
         req_ev.source = client_ep.clone();
         req_ev.destination = server_ep.clone();
         req_ev.protocol_stack = stack.clone();
         req_ev.evidence = evidence.clone();
-        req_ev.attributes.insert("http.method".into(), method.into());
+        req_ev
+            .attributes
+            .insert("http.method".into(), method.into());
         req_ev.attributes.insert("http.host".into(), host.into());
         req_ev.attributes.insert("http.path".into(), path.into());
-        req_ev.attributes.insert("http.request_headers".into(), headers_json(req_headers));
+        req_ev
+            .attributes
+            .insert("http.request_headers".into(), headers_json(req_headers));
         if !req_body.is_empty() {
             req_ev.payload = sink.put_payload(req_body, RedactionState::None);
         }
         sink.record_event(req_ev);
 
         let mut resp_ev = NetworkEvent::new(
-            capture_id, flow_id, 1, clock.stamp(),
-            Direction::ServerToClient, EventKind::HttpResponseHeaders,
+            capture_id,
+            flow_id,
+            1,
+            clock.stamp(),
+            Direction::ServerToClient,
+            EventKind::HttpResponseHeaders,
         );
         resp_ev.source = server_ep;
         resp_ev.destination = client_ep;
         resp_ev.protocol_stack = stack;
         resp_ev.evidence = evidence;
         if let Some(s) = status {
-            resp_ev.attributes.insert("http.status".into(), (s as i64).into());
+            resp_ev
+                .attributes
+                .insert("http.status".into(), (s as i64).into());
         }
-        resp_ev.attributes.insert("http.response_headers".into(), headers_json(resp_headers));
+        resp_ev
+            .attributes
+            .insert("http.response_headers".into(), headers_json(resp_headers));
         if !resp_body.is_empty() {
             resp_ev.payload = sink.put_payload(resp_body, RedactionState::None);
         }
@@ -413,7 +475,9 @@ impl Engine {
     /// headers off the events and bodies from the chunk store.
     pub fn exchange_for_flow(&self, flow_id: &str) -> Result<Option<flowmint_rules::HttpExchange>> {
         use flowmint_model::EventKind;
-        let Some(flow) = self.get_flow(flow_id)? else { return Ok(None) };
+        let Some(flow) = self.get_flow(flow_id)? else {
+            return Ok(None);
+        };
         let mut ex = flowmint_rules::HttpExchange::request(
             flow.method.as_deref().unwrap_or("GET"),
             flow.host.as_deref().unwrap_or(""),
@@ -471,20 +535,38 @@ impl Engine {
                 continue;
             }
             let events = self.events_for_flow(flow.flow_id.as_str())?;
-            let req = events.iter().find(|e| matches!(e.kind, EventKind::HttpRequestHeaders));
-            let resp = events.iter().find(|e| matches!(e.kind, EventKind::HttpResponseHeaders));
+            let req = events
+                .iter()
+                .find(|e| matches!(e.kind, EventKind::HttpRequestHeaders));
+            let resp = events
+                .iter()
+                .find(|e| matches!(e.kind, EventKind::HttpResponseHeaders));
             // 导出 HAR 时把 body 按 Content-Encoding 解压，text 字段才是可读原文。
             let decode = |e: Option<&NetworkEvent>, key: &str| -> Vec<u8> {
-                let raw = e.and_then(|e| e.payload.as_ref())
-                    .and_then(|p| self.get_payload(p).ok()).unwrap_or_default();
-                let enc = e.and_then(|e| headers_from_event(e, key).into_iter()
-                    .find(|(k, _)| k.eq_ignore_ascii_case("content-encoding")).map(|(_, v)| v));
+                let raw = e
+                    .and_then(|e| e.payload.as_ref())
+                    .and_then(|p| self.get_payload(p).ok())
+                    .unwrap_or_default();
+                let enc = e.and_then(|e| {
+                    headers_from_event(e, key)
+                        .into_iter()
+                        .find(|(k, _)| k.eq_ignore_ascii_case("content-encoding"))
+                        .map(|(_, v)| v)
+                });
                 flowmint_proxy_http::decode::decode_body(enc.as_deref(), &raw)
             };
             let req_body = decode(req, "http.request_headers");
             let resp_body = decode(resp, "http.response_headers");
 
-            let tls = req.map(|e| e.protocol_stack.tls.as_ref().map(|t| t.decrypted).unwrap_or(false)).unwrap_or(false);
+            let tls = req
+                .map(|e| {
+                    e.protocol_stack
+                        .tls
+                        .as_ref()
+                        .map(|t| t.decrypted)
+                        .unwrap_or(false)
+                })
+                .unwrap_or(false);
             let scheme = if tls { "https" } else { "http" };
             let default_port = if tls { 443 } else { 80 };
             let host_s = flow.host.as_deref().unwrap_or("");
@@ -529,7 +611,9 @@ impl Engine {
         flow_id: &str,
         rule: &flowmint_model::Rule,
     ) -> Result<Option<(flowmint_rules::Decision, Vec<flowmint_rules::Change>)>> {
-        let Some(before) = self.exchange_for_flow(flow_id)? else { return Ok(None) };
+        let Some(before) = self.exchange_for_flow(flow_id)? else {
+            return Ok(None);
+        };
         let mut after = before.clone();
         let decision = flowmint_rules::apply(rule, &mut after);
         let changes = flowmint_rules::diff(&before, &after);

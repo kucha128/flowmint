@@ -61,7 +61,12 @@ async fn handle(mut stream: tokio::net::TcpStream, ctx: Arc<Ctx>) -> std::io::Re
     Ok(())
 }
 
-fn route(ctx: &Ctx, method: &str, path: &str, headers: &[(String, String)]) -> (&'static str, String) {
+fn route(
+    ctx: &Ctx,
+    method: &str,
+    path: &str,
+    headers: &[(String, String)],
+) -> (&'static str, String) {
     let (path_only, query) = match path.split_once('?') {
         Some((p, q)) => (p, q),
         None => (path, ""),
@@ -75,12 +80,18 @@ fn route(ctx: &Ctx, method: &str, path: &str, headers: &[(String, String)]) -> (
         }).to_string());
     }
     if method == "GET" && path_only == "/health" {
-        return ("200 OK", json!({ "status": "ok", "version": env!("CARGO_PKG_VERSION") }).to_string());
+        return (
+            "200 OK",
+            json!({ "status": "ok", "version": env!("CARGO_PKG_VERSION") }).to_string(),
+        );
     }
 
     // Auth for everything else.
     if !authorized(ctx, headers) {
-        return ("401 Unauthorized", json!({ "error": "missing or invalid bearer token" }).to_string());
+        return (
+            "401 Unauthorized",
+            json!({ "error": "missing or invalid bearer token" }).to_string(),
+        );
     }
 
     match (method, path_only) {
@@ -131,7 +142,10 @@ fn ok(v: serde_json::Value) -> (&'static str, String) {
 }
 
 fn err_500(e: anyhow::Error) -> (&'static str, String) {
-    ("500 Internal Server Error", json!({ "error": e.to_string() }).to_string())
+    (
+        "500 Internal Server Error",
+        json!({ "error": e.to_string() }).to_string(),
+    )
 }
 
 fn query_param(query: &str, key: &str) -> Option<String> {
@@ -166,13 +180,18 @@ async fn read_request<R: tokio::io::AsyncRead + Unpin>(
     }
     let text = String::from_utf8_lossy(&data);
     let mut lines = text.split("\r\n");
-    let Some(start) = lines.next() else { return Ok(None) };
+    let Some(start) = lines.next() else {
+        return Ok(None);
+    };
     let mut parts = start.split_whitespace();
     let method = parts.next().unwrap_or("").to_string();
     let path = parts.next().unwrap_or("/").to_string();
     let headers = lines
         .filter(|l| !l.is_empty())
-        .filter_map(|l| l.split_once(':').map(|(k, v)| (k.trim().to_string(), v.trim().to_string())))
+        .filter_map(|l| {
+            l.split_once(':')
+                .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
+        })
         .collect();
     Ok(Some((method, path, headers)))
 }

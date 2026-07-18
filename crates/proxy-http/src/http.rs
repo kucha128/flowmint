@@ -40,7 +40,10 @@ pub async fn read_head_bytes<R: AsyncBufRead + Unpin>(r: &mut R) -> io::Result<V
             break;
         }
         if head.len() > 64 * 1024 {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "http head too large"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "http head too large",
+            ));
         }
     }
     Ok(head)
@@ -65,7 +68,10 @@ pub fn parse_head(bytes: &[u8]) -> Option<Head> {
             headers.push((k.trim().to_string(), v.trim().to_string()));
         }
     }
-    Some(Head { start_line: (a, b, c), headers })
+    Some(Head {
+        start_line: (a, b, c),
+        headers,
+    })
 }
 
 /// Read a message body according to its framing headers. For responses with
@@ -120,7 +126,8 @@ async fn read_chunked<R: AsyncBufRead + Unpin>(r: &mut R) -> io::Result<Vec<u8>>
             break;
         }
         let s = String::from_utf8_lossy(&size_line);
-        let size = usize::from_str_radix(s.split(';').next().unwrap_or("0").trim(), 16).unwrap_or(0);
+        let size =
+            usize::from_str_radix(s.split(';').next().unwrap_or("0").trim(), 16).unwrap_or(0);
         if size == 0 {
             // Consume trailers / final CRLF.
             loop {
@@ -133,7 +140,10 @@ async fn read_chunked<R: AsyncBufRead + Unpin>(r: &mut R) -> io::Result<Vec<u8>>
             break;
         }
         if body.len() + size > MAX_BODY_BYTES {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "chunked body exceeds cap"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "chunked body exceeds cap",
+            ));
         }
         let mut buf = vec![0u8; size];
         r.read_exact(&mut buf).await?;
@@ -187,7 +197,10 @@ mod tests {
 
     #[test]
     fn parses_connect_target() {
-        assert_eq!(parse_connect_target("example.com:443"), Some(("example.com".into(), 443)));
+        assert_eq!(
+            parse_connect_target("example.com:443"),
+            Some(("example.com".into(), 443))
+        );
         assert_eq!(parse_connect_target("nope"), None);
     }
 
