@@ -35,6 +35,10 @@ typedef void (*FmHttpCallback)(const FmHttpEvent* ev, void* user);
 /* 拦截改包回调。返回动作码：0=放行, 1=修改并放行, 2=丢弃。 */
 typedef int32_t (*FmInterceptCallback)(FmInterceptMsg* msg, void* user);
 
+typedef struct FmWsFrame FmWsFrame;
+/* WebSocket 帧拦截回调。返回：0=放行, 1=修改, 2=丢弃该帧, 3=断开连接。 */
+typedef int32_t (*FmWsCallback)(FmWsFrame* frame, void* user);
+
 /* ---- 生命周期 ---- */
 FmContext*  fm_context_new(void);
 void        fm_context_free(FmContext* ctx);
@@ -46,6 +50,7 @@ void        fm_set_ca(FmContext* ctx, const char* cert_pem, const char* key_pem)
 void        fm_set_upstream_proxy(FmContext* ctx, const char* host_port);
 void        fm_set_http_callback(FmContext* ctx, FmHttpCallback cb, void* user);
 void        fm_set_intercept_callback(FmContext* ctx, FmInterceptCallback cb, void* user);
+void        fm_set_ws_callback(FmContext* ctx, FmWsCallback cb, void* user); /* WebSocket 帧拦截 */
 bool        fm_start(FmContext* ctx);   /* 失败返回 false，用 fm_last_error 取原因 */
 void        fm_stop(FmContext* ctx);
 const char* fm_last_error(FmContext* ctx);
@@ -74,6 +79,12 @@ const uint8_t* fm_intercept_body(const FmInterceptMsg* msg, size_t* out_len);
 void        fm_intercept_set_body(FmInterceptMsg* msg, const uint8_t* data, size_t len);
 void        fm_intercept_set_status(FmInterceptMsg* msg, int32_t status);
 void        fm_intercept_set_header(FmInterceptMsg* msg, const char* name, const char* value);
+
+/* ---- WebSocket 帧拦截（仅 WS 回调期间有效）---- */
+int32_t     fm_ws_is_outgoing(const FmWsFrame* frame); /* 1=客户端->服务器, 0=反向 */
+int32_t     fm_ws_opcode(const FmWsFrame* frame);      /* 1=text,2=binary,8=close,9=ping,10=pong */
+const uint8_t* fm_ws_payload(const FmWsFrame* frame, size_t* out_len);
+void        fm_ws_set_payload(FmWsFrame* frame, const uint8_t* data, size_t len); /* 需回调返回 1 */
 
 #ifdef __cplusplus
 } /* extern "C" */

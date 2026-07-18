@@ -16,7 +16,7 @@ pub mod intercept;
 pub mod procinfo;
 pub mod ws;
 
-pub use intercept::{Decision, Edit, InterceptHook, InterceptMessage};
+pub use intercept::{Decision, Edit, InterceptHook, InterceptMessage, WsDecision};
 
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -710,6 +710,30 @@ async fn pump_ws<S, R, W>(
             ev.payload = ctx.sink.put_payload(&frame.payload, RedactionState::None);
         }
         ctx.sink.record_event(ev);
+
+        // 帧拦截：转发前调钩子，可改 payload / 丢帧 / 断开。
+        let mut frame = frame;
+        if let Some(hook) = &ctx.hook {
+            if hook.enabled() {
+                let outgoing = direction == Direction::ClientToServer;
+                match hook.intercept_ws(outgoing, frame.opcode.as_u8(), &frame.payload) {
+                    WsDecision::Forward => {}
+                    WsDecision::Modify(p) => frame.payload = p,
+                    WsDecision::Drop => continue, // 不转发这一帧
+                    WsDecision::Close => {
+                        let close = ws::Frame {
+                            fin: true,
+                            opcode: ws::Opcode::Close,
+                            masked: false,
+                            payload: Vec::new(),
+                        };
+                        let _ = to.write_all(&ws::encode_frame(&close, mask)).await;
+                        let _ = to.flush().await;
+                        break;
+                    }
+                }
+            }
+        }
 
         let bytes = ws::encode_frame(&frame, mask);
         if to.write_all(&bytes).await.is_err() {

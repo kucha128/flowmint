@@ -40,6 +40,9 @@ proxy-http + tls + model   （抓包引擎）
 | `fm_http_event_type/method/url/host/status/body(ev)` | 观察回调内读取事件字段 |
 | `fm_intercept_is_response/method/url/status/body(msg)` | 拦截回调内读取消息字段 |
 | `fm_intercept_set_body/status/header(msg, …)` | 拦截回调内改写 Body/状态码/头 |
+| `fm_set_ws_callback(ctx, cb, user)` | 注册 **WebSocket 帧拦截**回调 |
+| `fm_ws_is_outgoing/opcode/payload(frame)` | WS 回调内读方向/opcode/payload |
+| `fm_ws_set_payload(frame, …)` | WS 回调内改写帧 payload |
 
 两类回调：
 - **观察**（`fm_set_http_callback`）：请求/响应完成后回传，只读。
@@ -145,6 +148,26 @@ fm_set_intercept_callback(ctx, on_intercept, nullptr);
 ```
 
 C# 用 `OnIntercept(m => { …; return InterceptAction.Modify; })`，Go 用 `OnIntercept(func(m *Intercept) int32 { …; return Modify })`，Java 用 `onIntercept(m -> { …; return MODIFY; })`，易语言见声明文件——语义一致。
+
+## 拦截 WebSocket 帧（改帧 / 丢帧 / 主动断开）
+
+ws/wss 抓包默认就有（帧被记录）。要**改帧/丢帧/断开**，注册 WS 帧回调 `fm_set_ws_callback`：
+回调收到每一帧（方向 / opcode / **已解压明文 payload**），返回 `WS_FORWARD`(0) / `WS_MODIFY`(1，配合
+`set_payload`) / `WS_DROP`(2，丢弃该帧) / `WS_CLOSE`(3，**主动断开连接**)。
+
+可直接运行的 DEMO（自带本地 ws echo + 客户端）：[sdks/python/demo_ws.py](../sdks/python/demo_ws.py)
+（`python demo_ws.py`，演示把文本帧内容改写）。
+
+**Python WS 改帧片段**
+```python
+def on_ws(f: flowmint.WsFrame) -> int:
+    if f.outgoing and f.is_text:       # 客户端发出的文本帧
+        f.set_payload(b"HACKED")
+        return flowmint.WS_MODIFY
+    return flowmint.WS_FORWARD          # 或 WS_DROP 丢帧 / WS_CLOSE 断开
+
+fm.bind_port(8888).on_ws(on_ws).start()
+```
 
 ## MITM 证书
 

@@ -36,6 +36,18 @@ pub struct Edit {
     pub body: Vec<u8>,
 }
 
+/// 对一帧 WebSocket 消息的决定。
+pub enum WsDecision {
+    /// 原样转发。
+    Forward,
+    /// 用新 payload 转发。
+    Modify(Vec<u8>),
+    /// 丢弃这一帧（不转发，连接继续）。
+    Drop,
+    /// 主动断开这个 WebSocket 连接。
+    Close,
+}
+
 /// 代理调用的拦截钩子。返回装箱 Future 以便 `Arc<dyn InterceptHook>`。
 pub trait InterceptHook: Send + Sync + 'static {
     /// 断点是否开启。关闭时代理直接放行、不构造消息（零开销）。
@@ -45,4 +57,11 @@ pub trait InterceptHook: Send + Sync + 'static {
         &'a self,
         msg: InterceptMessage,
     ) -> Pin<Box<dyn Future<Output = Decision> + Send + 'a>>;
+
+    /// 拦截一帧 WebSocket 消息（转发前调用，同步）。`outgoing` = 客户端→服务器方向；
+    /// `opcode`：1=text, 2=binary, 8=close, 9=ping, 10=pong。默认放行。
+    fn intercept_ws(&self, outgoing: bool, opcode: u8, payload: &[u8]) -> WsDecision {
+        let _ = (outgoing, opcode, payload);
+        WsDecision::Forward
+    }
 }

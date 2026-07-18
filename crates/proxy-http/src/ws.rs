@@ -41,6 +41,18 @@ impl Opcode {
             Opcode::Reserved(_) => "reserved",
         }
     }
+
+    pub fn as_u8(&self) -> u8 {
+        match self {
+            Opcode::Continuation => 0x0,
+            Opcode::Text => 0x1,
+            Opcode::Binary => 0x2,
+            Opcode::Close => 0x8,
+            Opcode::Ping => 0x9,
+            Opcode::Pong => 0xA,
+            Opcode::Reserved(v) => *v,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

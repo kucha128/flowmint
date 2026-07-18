@@ -4,10 +4,42 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use std::future::Future;
+use std::pin::Pin;
+
 use flowmint_model::{CaptureId, Clock, EventKind, Flow, NetworkEvent, PayloadRef, RedactionState};
-use flowmint_proxy_http::{serve, ws, FlowSink, ProxyContext};
+use flowmint_proxy_http::{
+    serve, ws, Decision, FlowSink, InterceptHook, InterceptMessage, ProxyContext, WsDecision,
+};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
+
+/// 测试用 WS 拦截钩子：把客户端发出的 text 帧改成固定内容，或断开。
+struct WsHook {
+    close: bool,
+}
+impl InterceptHook for WsHook {
+    fn enabled(&self) -> bool {
+        true
+    }
+    fn intercept<'a>(
+        &'a self,
+        _msg: InterceptMessage,
+    ) -> Pin<Box<dyn Future<Output = Decision> + Send + 'a>> {
+        Box::pin(async { Decision::Continue })
+    }
+    fn intercept_ws(&self, outgoing: bool, opcode: u8, _payload: &[u8]) -> WsDecision {
+        if outgoing && opcode == 0x1 {
+            if self.close {
+                WsDecision::Close
+            } else {
+                WsDecision::Modify(b"MODIFIED".to_vec())
+            }
+        } else {
+            WsDecision::Forward
+        }
+    }
+}
 
 struct TestSink {
     events: Mutex<Vec<NetworkEvent>>,
@@ -159,4 +191,81 @@ async fn ws_frames_are_captured_through_proxy() {
             .any(|e| e.attributes.get("ws.opcode").and_then(|v| v.as_str()) == Some("text")),
         "expected a text frame event"
     );
+}
+
+/// 起 echo 服务 + 代理（可挂拦截钩子），完成 ws 升级，返回已升级的客户端连接。
+async fn ws_upgrade(hook: Option<Arc<dyn InterceptHook>>) -> TcpStream {
+    let echo_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let echo_addr = echo_listener.local_addr().unwrap();
+    tokio::spawn(ws_echo_server(echo_listener));
+
+    let sink = Arc::new(TestSink {
+        events: Mutex::new(Vec::new()),
+    });
+    let ctx = ProxyContext {
+        sink,
+        capture_id: CaptureId::new(),
+        clock: Clock::start_now(),
+        mitm: None,
+        hook,
+        upstream_proxy: None,
+        proxy_port: 0,
+        ca_pem: None,
+        ca_der: None,
+    };
+    let proxy_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let proxy_addr = proxy_listener.local_addr().unwrap();
+    tokio::spawn(serve(proxy_listener, ctx));
+
+    let mut client = TcpStream::connect(proxy_addr).await.unwrap();
+    let req = format!(
+        "GET http://{echo_addr}/ws HTTP/1.1\r\nHost: {echo_addr}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
+    );
+    client.write_all(req.as_bytes()).await.unwrap();
+    client.flush().await.unwrap();
+    let mut head = Vec::new();
+    let mut b = [0u8; 1];
+    loop {
+        let n = client.read(&mut b).await.unwrap();
+        assert_ne!(n, 0, "eof before 101");
+        head.push(b[0]);
+        if head.ends_with(b"\r\n\r\n") {
+            break;
+        }
+    }
+    client
+}
+
+fn text_frame(payload: &[u8]) -> Vec<u8> {
+    ws::encode_frame(
+        &ws::Frame {
+            fin: true,
+            opcode: ws::Opcode::Text,
+            masked: true,
+            payload: payload.to_vec(),
+        },
+        Some([9, 8, 7, 6]),
+    )
+}
+
+#[tokio::test]
+async fn ws_frame_modified_by_hook() {
+    let mut client = ws_upgrade(Some(Arc::new(WsHook { close: false }))).await;
+    client.write_all(&text_frame(b"ping")).await.unwrap();
+    client.flush().await.unwrap();
+    // 客户端发的 text 帧被钩子改成 "MODIFIED"，echo 原样回传。
+    let echoed = ws::read_frame(&mut client).await.unwrap().unwrap();
+    assert_eq!(echoed.payload, b"MODIFIED");
+}
+
+#[tokio::test]
+async fn ws_closed_by_hook() {
+    let mut client = ws_upgrade(Some(Arc::new(WsHook { close: true }))).await;
+    client.write_all(&text_frame(b"ping")).await.unwrap();
+    client.flush().await.unwrap();
+    // 钩子返回 Close：代理向上游发 close 并断开；客户端最终读到 Close 帧或 EOF。
+    match ws::read_frame(&mut client).await {
+        Ok(Some(f)) => assert_eq!(f.opcode, ws::Opcode::Close),
+        Ok(None) | Err(_) => {} // EOF / 断开也算成功
+    }
 }

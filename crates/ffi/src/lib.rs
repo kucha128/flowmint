@@ -25,7 +25,7 @@ use std::sync::{Arc, Mutex};
 
 use flowmint_model::{CaptureId, Clock, EventKind, Flow, NetworkEvent, PayloadRef, RedactionState};
 use flowmint_proxy_http::{
-    Decision, Edit, FlowSink, InterceptHook, InterceptMessage, MitmConfig, ProxyContext,
+    Decision, Edit, FlowSink, InterceptHook, InterceptMessage, MitmConfig, ProxyContext, WsDecision,
 };
 use flowmint_tls::CertAuthority;
 use tokio::net::TcpListener;
@@ -278,10 +278,12 @@ impl FmInterceptMsg {
     }
 }
 
-/// 把 C 拦截回调适配成代理的 `InterceptHook`。回调同步执行于代理工作线程。
+/// 把 C 回调适配成代理的 `InterceptHook`（HTTP 改包 + WS 帧拦截）。回调同步执行于工作线程。
 struct FfiInterceptHook {
-    cb: FmInterceptCallback,
+    cb: Option<FmInterceptCallback>,
     user: *mut c_void,
+    ws_cb: Option<FmWsCallback>,
+    ws_user: *mut c_void,
 }
 unsafe impl Send for FfiInterceptHook {}
 unsafe impl Sync for FfiInterceptHook {}
@@ -296,10 +298,113 @@ impl InterceptHook for FfiInterceptHook {
         msg: InterceptMessage,
     ) -> Pin<Box<dyn Future<Output = Decision> + Send + 'a>> {
         Box::pin(async move {
+            let Some(cb) = self.cb else {
+                return Decision::Continue;
+            };
             let mut m = FmInterceptMsg::from_msg(msg);
-            let action = (self.cb)(&mut m as *mut FmInterceptMsg, self.user);
+            let action = cb(&mut m as *mut FmInterceptMsg, self.user);
             m.into_decision(action)
         })
+    }
+
+    fn intercept_ws(&self, outgoing: bool, opcode: u8, payload: &[u8]) -> WsDecision {
+        let Some(cb) = self.ws_cb else {
+            return WsDecision::Forward;
+        };
+        let mut f = FmWsFrame {
+            outgoing,
+            opcode,
+            payload: payload.to_vec(),
+            new_payload: None,
+        };
+        let action = cb(&mut f as *mut FmWsFrame, self.ws_user);
+        f.into_decision(action)
+    }
+}
+
+/// WS 帧拦截回调：返回 0=放行, 1=修改, 2=丢弃, 3=断开连接。
+pub type FmWsCallback = extern "C" fn(frame: *mut FmWsFrame, user: *mut c_void) -> i32;
+
+#[derive(Clone, Copy)]
+struct WsInterceptTarget {
+    cb: Option<FmWsCallback>,
+    user: *mut c_void,
+}
+unsafe impl Send for WsInterceptTarget {}
+unsafe impl Sync for WsInterceptTarget {}
+
+/// 传给 WS 回调的一帧（可读方向/opcode/payload，可用 set_payload 改写）。
+pub struct FmWsFrame {
+    outgoing: bool,
+    opcode: u8,
+    payload: Vec<u8>,
+    new_payload: Option<Vec<u8>>,
+}
+
+impl FmWsFrame {
+    fn into_decision(self, action: i32) -> WsDecision {
+        match action {
+            1 => WsDecision::Modify(self.new_payload.unwrap_or(self.payload)),
+            2 => WsDecision::Drop,
+            3 => WsDecision::Close,
+            _ => WsDecision::Forward,
+        }
+    }
+}
+
+/// 注册 WS 帧拦截回调（传 NULL 清除）。必须在 `fm_start` 之前调用。
+#[no_mangle]
+pub unsafe extern "C" fn fm_set_ws_callback(
+    ctx: *mut FmContext,
+    cb: Option<FmWsCallback>,
+    user: *mut c_void,
+) {
+    if let Some(c) = ctx.as_mut() {
+        c.ws_intercept = WsInterceptTarget { cb, user };
+    }
+}
+
+/// 该帧是否客户端→服务器方向（1）还是服务器→客户端（0）。
+#[no_mangle]
+pub unsafe extern "C" fn fm_ws_is_outgoing(frame: *const FmWsFrame) -> i32 {
+    frame.as_ref().map(|f| f.outgoing as i32).unwrap_or(0)
+}
+
+/// opcode：1=text, 2=binary, 8=close, 9=ping, 10=pong。
+#[no_mangle]
+pub unsafe extern "C" fn fm_ws_opcode(frame: *const FmWsFrame) -> i32 {
+    frame.as_ref().map(|f| f.opcode as i32).unwrap_or(0)
+}
+
+/// 帧 payload 指针 + 长度；指针仅在回调期间有效。
+#[no_mangle]
+pub unsafe extern "C" fn fm_ws_payload(frame: *const FmWsFrame, out_len: *mut usize) -> *const u8 {
+    match frame.as_ref() {
+        Some(f) => {
+            if !out_len.is_null() {
+                *out_len = f.payload.len();
+            }
+            f.payload.as_ptr()
+        }
+        None => {
+            if !out_len.is_null() {
+                *out_len = 0;
+            }
+            ptr::null()
+        }
+    }
+}
+
+/// 改写帧 payload（拷贝 `len` 字节）。需回调返回 1 才生效。
+#[no_mangle]
+pub unsafe extern "C" fn fm_ws_set_payload(frame: *mut FmWsFrame, data: *const u8, len: usize) {
+    if let Some(f) = frame.as_mut() {
+        let bytes = if data.is_null() || len == 0 {
+            Vec::new()
+        } else {
+            slice::from_raw_parts(data, len).to_vec()
+        };
+        f.new_payload = Some(bytes);
     }
 }
 
@@ -422,6 +527,7 @@ pub struct FmContext {
     upstream: Option<String>,
     target: CallbackTarget,
     intercept: InterceptTarget,
+    ws_intercept: WsInterceptTarget,
     runtime: Option<Runtime>,
     handle: Option<JoinHandle<std::io::Result<()>>>,
     error: CString,
@@ -454,6 +560,10 @@ pub extern "C" fn fm_context_new() -> *mut FmContext {
             user: ptr::null_mut(),
         },
         intercept: InterceptTarget {
+            cb: None,
+            user: ptr::null_mut(),
+        },
+        ws_intercept: WsInterceptTarget {
             cb: None,
             user: ptr::null_mut(),
         },
@@ -579,13 +689,18 @@ pub unsafe extern "C" fn fm_start(ctx: *mut FmContext) -> bool {
         bodies: Mutex::new(HashMap::new()),
         requests: Mutex::new(HashMap::new()),
     });
-    let hook: Option<Arc<dyn InterceptHook>> = match c.intercept.cb {
-        Some(cb) => Some(Arc::new(FfiInterceptHook {
-            cb,
-            user: c.intercept.user,
-        })),
-        None => None,
-    };
+    // 只要设了 HTTP 改包或 WS 帧回调之一，就挂拦截钩子。
+    let hook: Option<Arc<dyn InterceptHook>> =
+        if c.intercept.cb.is_some() || c.ws_intercept.cb.is_some() {
+            Some(Arc::new(FfiInterceptHook {
+                cb: c.intercept.cb,
+                user: c.intercept.user,
+                ws_cb: c.ws_intercept.cb,
+                ws_user: c.ws_intercept.user,
+            }))
+        } else {
+            None
+        };
     let pctx = ProxyContext {
         sink,
         capture_id: CaptureId::new(),

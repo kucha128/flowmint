@@ -34,6 +34,12 @@ CONTINUE = 0  # 放行
 MODIFY = 1    # 修改并放行（配合 set_body/set_status/set_header）
 DROP = 2      # 丢弃
 
+# WebSocket 帧动作码（on_ws 回调的返回值）
+WS_FORWARD = 0  # 放行
+WS_MODIFY = 1   # 修改 payload（配合 set_payload）
+WS_DROP = 2     # 丢弃该帧
+WS_CLOSE = 3    # 断开连接
+
 
 def _find_dll() -> str:
     """定位 flowmint 动态库：环境变量 > 同目录 > 仓库 target 目录。"""
@@ -99,6 +105,15 @@ def _bind(dll_path: str) -> C.CDLL:
     lib.fm_intercept_set_body.argtypes = [p, C.POINTER(C.c_ubyte), C.c_size_t]
     lib.fm_intercept_set_status.argtypes = [p, C.c_int32]
     lib.fm_intercept_set_header.argtypes = [p, C.c_char_p, C.c_char_p]
+    # WebSocket 帧拦截
+    lib.fm_set_ws_callback.argtypes = [p, _WSCB, p]
+    lib.fm_ws_is_outgoing.argtypes = [p]
+    lib.fm_ws_is_outgoing.restype = C.c_int32
+    lib.fm_ws_opcode.argtypes = [p]
+    lib.fm_ws_opcode.restype = C.c_int32
+    lib.fm_ws_payload.argtypes = [p, C.POINTER(C.c_size_t)]
+    lib.fm_ws_payload.restype = C.POINTER(C.c_ubyte)
+    lib.fm_ws_set_payload.argtypes = [p, C.POINTER(C.c_ubyte), C.c_size_t]
     return lib
 
 
@@ -106,6 +121,8 @@ def _bind(dll_path: str) -> C.CDLL:
 _CB = C.CFUNCTYPE(None, C.c_void_p, C.c_void_p)
 # 拦截回调签名：int32 (*)(FmInterceptMsg*, void*)
 _ICB = C.CFUNCTYPE(C.c_int32, C.c_void_p, C.c_void_p)
+# WS 帧回调签名：int32 (*)(FmWsFrame*, void*)
+_WSCB = C.CFUNCTYPE(C.c_int32, C.c_void_p, C.c_void_p)
 
 
 class HttpEvent:
@@ -155,12 +172,36 @@ class Intercept:
         self._lib.fm_intercept_set_header(self._ptr, name.encode(), value.encode())
 
 
+class WsFrame:
+    """一帧 WebSocket 消息（on_ws 回调内使用）：读方向/opcode/payload，用 set_payload 改写。"""
+
+    def __init__(self, lib, ptr):
+        self._lib = lib
+        self._ptr = ptr
+        self.outgoing = bool(lib.fm_ws_is_outgoing(ptr))  # True=客户端->服务器
+        self.opcode = lib.fm_ws_opcode(ptr)               # 1=text,2=binary,8=close,9=ping,10=pong
+        self.payload = _wspayload(lib, ptr)
+
+    @property
+    def is_text(self) -> bool:
+        return self.opcode == 1
+
+    @property
+    def is_binary(self) -> bool:
+        return self.opcode == 2
+
+    def set_payload(self, data: bytes) -> None:
+        buf = (C.c_ubyte * len(data)).from_buffer_copy(data) if data else None
+        self._lib.fm_ws_set_payload(self._ptr, buf, len(data))
+
+
 class FlowMint:
     def __init__(self, dll_path: Optional[str] = None):
         self._lib = _bind(dll_path or _find_dll())
         self._ctx = self._lib.fm_context_new()
         self._cb_holder = None  # 持有 ctypes 回调，防止被 GC
         self._icb_holder = None  # 拦截回调（同上）
+        self._wscb_holder = None  # WS 帧回调（同上）
 
     def version(self) -> str:
         return self._lib.fm_version().decode()
@@ -234,6 +275,19 @@ class FlowMint:
         lib.fm_set_intercept_callback(self._ctx, self._icb_holder, None)
         return self
 
+    def on_ws(self, callback: Callable[["WsFrame"], Optional[int]]) -> "FlowMint":
+        """注册 WebSocket 帧拦截回调。回调收到 WsFrame，返回
+        WS_FORWARD/WS_MODIFY/WS_DROP/WS_CLOSE（None 视为 WS_FORWARD）。改写用 frame.set_payload。"""
+        lib = self._lib
+
+        def trampoline(frame_ptr, _user):
+            action = callback(WsFrame(lib, frame_ptr))
+            return int(action) if action is not None else WS_FORWARD
+
+        self._wscb_holder = _WSCB(trampoline)
+        lib.fm_set_ws_callback(self._ctx, self._wscb_holder, None)
+        return self
+
     def export_ca(self, out_path: str) -> bool:
         return bool(self._lib.fm_export_ca(self._ctx, out_path.encode()))
 
@@ -266,6 +320,14 @@ def _cstr(p) -> str:
 def _body(lib, ev_ptr) -> bytes:
     n = C.c_size_t(0)
     ptr = lib.fm_http_event_body(ev_ptr, C.byref(n))
+    if not ptr or n.value == 0:
+        return b""
+    return bytes(ptr[: n.value])
+
+
+def _wspayload(lib, frame_ptr) -> bytes:
+    n = C.c_size_t(0)
+    ptr = lib.fm_ws_payload(frame_ptr, C.byref(n))
     if not ptr or n.value == 0:
         return b""
     return bytes(ptr[: n.value])
