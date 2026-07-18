@@ -290,6 +290,98 @@ async fn ws_closed_by_hook() {
     }
 }
 
+/// echo 服务变体：把收到的握手请求头存入 `sink`，供测试断言（如剥离压缩扩展）。
+async fn ws_echo_server_capturing(listener: TcpListener, sink: Arc<Mutex<Vec<u8>>>) {
+    let Ok((mut sock, _)) = listener.accept().await else {
+        return;
+    };
+    let mut head = Vec::new();
+    let mut b = [0u8; 1];
+    loop {
+        match sock.read(&mut b).await {
+            Ok(0) | Err(_) => return,
+            Ok(_) => head.push(b[0]),
+        }
+        if head.ends_with(b"\r\n\r\n") {
+            break;
+        }
+    }
+    *sink.lock().unwrap() = head;
+    let _ = sock
+        .write_all(b"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: dummy\r\n\r\n")
+        .await;
+    let _ = sock.flush().await;
+    while let Ok(Some(frame)) = ws::read_frame(&mut sock).await {
+        let echo = ws::Frame {
+            fin: true,
+            opcode: frame.opcode,
+            masked: false,
+            payload: frame.payload,
+        };
+        if sock
+            .write_all(&ws::encode_frame(&echo, None))
+            .await
+            .is_err()
+        {
+            break;
+        }
+        let _ = sock.flush().await;
+    }
+}
+
+/// 代理转发 ws 升级握手时应剥离 `Sec-WebSocket-Extensions`（permessage-deflate），
+/// 避免协商压缩扩展导致压缩帧无法逐帧改写/转发。
+#[tokio::test]
+async fn ws_upgrade_strips_permessage_deflate() {
+    let echo_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let echo_addr = echo_listener.local_addr().unwrap();
+    let captured = Arc::new(Mutex::new(Vec::<u8>::new()));
+    tokio::spawn(ws_echo_server_capturing(echo_listener, captured.clone()));
+
+    let sink = Arc::new(TestSink::new());
+    let ctx = ProxyContext {
+        sink,
+        capture_id: CaptureId::new(),
+        clock: Clock::start_now(),
+        mitm: None,
+        hook: None,
+        upstream_proxy: None,
+        proxy_port: 0,
+        ca_pem: None,
+        ca_der: None,
+        disconnects: None,
+    };
+    let proxy_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let proxy_addr = proxy_listener.local_addr().unwrap();
+    tokio::spawn(serve(proxy_listener, ctx));
+
+    let mut client = TcpStream::connect(proxy_addr).await.unwrap();
+    // 客户端 offer permessage-deflate。
+    let req = format!(
+        "GET http://{echo_addr}/ws HTTP/1.1\r\nHost: {echo_addr}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZQ==\r\nSec-WebSocket-Extensions: permessage-deflate\r\nSec-WebSocket-Version: 13\r\n\r\n"
+    );
+    client.write_all(req.as_bytes()).await.unwrap();
+    client.flush().await.unwrap();
+    let mut b = [0u8; 1];
+    let mut head = Vec::new();
+    loop {
+        let n = client.read(&mut b).await.unwrap();
+        assert_ne!(n, 0);
+        head.push(b[0]);
+        if head.ends_with(b"\r\n\r\n") {
+            break;
+        }
+    }
+
+    // 上游收到的握手头不应含压缩扩展。
+    let forwarded = String::from_utf8_lossy(&captured.lock().unwrap()).to_lowercase();
+    assert!(
+        !forwarded.contains("sec-websocket-extensions"),
+        "forwarded handshake should not carry Sec-WebSocket-Extensions:\n{forwarded}"
+    );
+    assert!(!forwarded.contains("permessage-deflate"));
+}
+
 /// 桌面「主动断开」：通过 DisconnectHub 按 flow_id 断开一个进行中的 ws 会话，
 /// 客户端随即读到 EOF。
 #[tokio::test]

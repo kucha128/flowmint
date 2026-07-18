@@ -632,10 +632,16 @@ async fn read_head_direct<S: AsyncRead + Unpin>(s: &mut S) -> std::io::Result<Ve
 }
 
 /// Origin-form upgrade request that preserves Upgrade/Connection/Sec-WebSocket-*.
+///
+/// 剥离 `Sec-WebSocket-Extensions`：不让客户端与服务器协商 permessage-deflate
+/// 等压缩扩展，从而所有帧都是**未压缩明文**——否则压缩帧带 RSV1、payload 为 deflate
+/// 数据，逐帧 relay 无法正确改写/转发（对标 Fiddler/Charles 的抓包行为）。
 fn build_upgrade_request(head: &Head, path: &str) -> Vec<u8> {
     let mut out = format!("{} {} HTTP/1.1\r\n", head.start_line.0, path).into_bytes();
     for (k, v) in &head.headers {
-        if k.eq_ignore_ascii_case("proxy-connection") {
+        if k.eq_ignore_ascii_case("proxy-connection")
+            || k.eq_ignore_ascii_case("sec-websocket-extensions")
+        {
             continue;
         }
         out.extend_from_slice(format!("{k}: {v}\r\n").as_bytes());
