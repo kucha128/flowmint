@@ -42,6 +42,8 @@ export default function App() {
   const refreshCaStatus = (dca = useDefaultCa) =>
     isCaInstalled(dca).then(setCaInstalled).catch(() => {});
   const seen = useRef<Set<string>>(new Set());
+  // 保存最新 flows，供轮询判断所选 flow 的协议（避免把 flows 塞进轮询依赖导致定时器频繁重建）。
+  const flowsRef = useRef<Flow[]>([]);
 
   useEffect(() => {
     // 从运行目录的配置文件恢复设置。
@@ -53,15 +55,19 @@ export default function App() {
     captureStatus().then(setRunning).catch(() => {});
     searchFlows("", 2000).then((fs) => {
       seen.current = new Set(fs.map((f) => f.flow_id));
-      setFlows(fs.slice().reverse());
+      const ordered = fs.slice().reverse();
+      flowsRef.current = ordered;
+      setFlows(ordered);
     }).catch(() => {});
 
     const unlisteners: (() => void)[] = [];
     onFlow((f) => {
       setFlows((prev) => {
-        if (seen.current.has(f.flow_id)) return prev.map((x) => (x.flow_id === f.flow_id ? f : x));
-        seen.current.add(f.flow_id);
-        return [f, ...prev];
+        const next = seen.current.has(f.flow_id)
+          ? prev.map((x) => (x.flow_id === f.flow_id ? f : x))
+          : (seen.current.add(f.flow_id), [f, ...prev]);
+        flowsRef.current = next;
+        return next;
       });
     }).then((u) => unlisteners.push(u));
     onBreakpoint((m) => setPausedQueue((q) => [...q, m])).then((u) => unlisteners.push(u));
@@ -72,6 +78,15 @@ export default function App() {
     if (!sel) { setDetail(null); return; }
     flowDetail(sel).then(setDetail).catch((e) => setBanner(String(e)));
   }, [sel]);
+
+  // WebSocket 会话会持续来帧：选中且抓包进行中时定时刷新详情，让帧列表自动更新。
+  useEffect(() => {
+    if (!sel || !running) return;
+    const isWs = flowsRef.current.find((x) => x.flow_id === sel)?.l7 === "websocket";
+    if (!isWs) return;
+    const id = setInterval(() => { flowDetail(sel).then(setDetail).catch(() => {}); }, 1000);
+    return () => clearInterval(id);
+  }, [sel, running]);
 
   // 屏蔽 webview 默认右键菜单（刷新/另存为…）；会话列表用自绘的上下文菜单。
   useEffect(() => {
