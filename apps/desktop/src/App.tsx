@@ -2,8 +2,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   captureStatus, clearStorage, clearSystemProxy, exportHar, flowDetail, getConfig, installCa,
-  onBreakpoint, onFlow, resumeBreakpoint, searchFlows, setBreakpoints, setConfig, setSystemProxy,
-  startCapture, stopCapture, type Flow, type FlowDetail, type PausedMessage,
+  onBreakpoint, onFlow, regenerateCa, resumeBreakpoint, searchFlows, setBreakpoints, setConfig,
+  setSystemProxy, startCapture, stopCapture, type Flow, type FlowDetail, type PausedMessage,
 } from "./lib/api";
 import { curlOf, seedFromDetail, urlFromFlow, type ComposerSeed } from "./lib/format";
 import { MenuBar, type MenuDef } from "./components/MenuBar";
@@ -26,7 +26,7 @@ export default function App() {
   const [mitm, setMitm] = useState(false);
   const [insecure, setInsecure] = useState(false);
   const [upstream, setUpstream] = useState("");
-  const [useDefaultCa, setUseDefaultCa] = useState(false);
+  const [useDefaultCa, setUseDefaultCa] = useState(true);
   const [sysProxy, setSysProxy] = useState(false);
   const [bpEnabled, setBpEnabled] = useState(false);
   const [pausedQueue, setPausedQueue] = useState<PausedMessage[]>([]);
@@ -174,7 +174,19 @@ export default function App() {
       .catch((e) => setBanner(String(e)));
   }
   function replayCurrent() { if (detail) { setSeed(seedFromDetail(detail)); setMode("compose"); } }
-  function installCert() { installCa(useDefaultCa).then((m) => setBanner(m)).catch((e) => setBanner("安装证书失败: " + e)); }
+  // 证书区两个动作：都切换到对应证书并安装到本机。
+  async function useDefaultCert() {
+    await changeDefaultCa(true);
+    installCa(true).then((m) => setBanner("已使用默认证书并安装 · " + m)).catch((e) => setBanner("安装证书失败: " + e));
+  }
+  async function createNewCert() {
+    try {
+      await regenerateCa();
+      await changeDefaultCa(false);
+      const m = await installCa(false);
+      setBanner("已创建新证书并安装 · " + m);
+    } catch (e) { setBanner("创建证书失败: " + e); }
+  }
   function doExportHar() { exportHar(filter || undefined).then((p) => setBanner("HAR → " + p)).catch((e) => setBanner(String(e))); }
 
   // --- 右键菜单动作 ---
@@ -274,8 +286,7 @@ export default function App() {
           port={port} setPort={setPort}
           mitm={mitm} onMitm={changeMitm} insecure={insecure} onInsecure={changeInsecure}
           upstream={upstream} onSave={applyUpstream}
-          useDefaultCa={useDefaultCa} onDefaultCa={changeDefaultCa}
-          onInstallCa={installCert}
+          useDefaultCa={useDefaultCa} onUseDefault={useDefaultCert} onCreateNew={createNewCert}
         />
       )}
     </div>

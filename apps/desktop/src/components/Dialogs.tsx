@@ -29,8 +29,8 @@ interface SettingsProps {
   upstream: string;
   onSave: (upstream: string) => void; // 保存端口/上游/MITM 到配置并（抓包中）重启生效
   useDefaultCa: boolean;
-  onDefaultCa: (v: boolean) => void;
-  onInstallCa: () => void;
+  onUseDefault: () => void;
+  onCreateNew: () => void;
 }
 
 const TABS = ["代理", "HTTPS 解密"] as const;
@@ -88,31 +88,14 @@ export function SettingsDialog(p: SettingsProps) {
               </label>
             )}
             <div className="field">
-              <span>使用哪张 CA</span>
-              <label className="chk-row">
-                <input type="radio" name="casrc" checked={!p.useDefaultCa}
-                  onChange={() => p.onDefaultCa(false)} />
-                <span>本机生成（更安全，推荐）—— 每机唯一、私钥仅本地</span>
-              </label>
-              <label className="chk-row">
-                <input type="radio" name="casrc" checked={p.useDefaultCa}
-                  onChange={() => p.onDefaultCa(true)} />
-                <span>内置默认共享证书（⚠️ 私钥公开，仅图省事的临时调试）</span>
-              </label>
-              {p.useDefaultCa && (
-                <em className="muted" style={{ color: "var(--err)" }}>
-                  ⚠️ 默认证书私钥是公开的：任何人都能用它伪造网站证书，装了它的机器可被他人解密 HTTPS。切勿在日常/敏感机器上使用。
-                </em>
-              )}
-            </div>
-            <div className="field">
-              <span>安装证书</span>
-              <div>
-                <button onClick={p.onInstallCa}>安装当前 CA 到本机</button>
+              <span>证书</span>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button className={p.useDefaultCa ? "primary" : ""} onClick={p.onUseDefault}>使用默认证书</button>
+                <button className={!p.useDefaultCa ? "primary" : ""} onClick={p.onCreateNew}>创建新证书</button>
               </div>
               <em className="muted">
-                解密 HTTPS 前需把当前 CA 装进用户根存储，浏览器/客户端才会信任解密出的证书。
-                其它设备（手机等）可在浏览器打开 <b>http://&lt;本机IP&gt;:{p.port}/</b> 下载安装。
+                点按钮即切换并安装到本机。当前：{p.useDefaultCa ? "默认证书" : "本机证书"}。
+                其它设备可在浏览器打开 <b>http://&lt;本机IP&gt;:{p.port}/</b> 下载安装。
               </em>
             </div>
           </>

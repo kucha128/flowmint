@@ -65,6 +65,8 @@ export const setConfig = (config: AppConfig) => invoke<void>("set_config", { con
 
 export const installCa = (useDefaultCa: boolean) => invoke<string>("install_ca", { useDefaultCa });
 
+export const regenerateCa = () => invoke<void>("regenerate_ca");
+
 export const setSystemProxy = (port: number) => invoke<void>("set_system_proxy", { port });
 
 export const clearSystemProxy = () => invoke<void>("clear_system_proxy");

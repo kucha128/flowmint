@@ -140,6 +140,15 @@ impl Engine {
         Ok(self.active_ca(use_default)?.ca_pem().to_string())
     }
 
+    /// 删除本机 CA 并重新生成一张全新的（「创建新证书」）。返回新 CA 的 PEM。
+    pub fn regenerate_ca(&self) -> Result<String> {
+        let dir = self.ca_dir();
+        let _ = std::fs::remove_file(dir.join("ca.pem"));
+        let _ = std::fs::remove_file(dir.join("ca.key.pem"));
+        let ca = flowmint_tls::CertAuthority::load_or_create(dir)?;
+        Ok(ca.ca_pem().to_string())
+    }
+
     /// Start an explicit HTTP capture bound to `bind` (should be loopback).
     /// When `mitm` is true, HTTPS is intercepted using the profile CA (design
     /// §7.2). Runs until the returned future is dropped/cancelled.

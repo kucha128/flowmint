@@ -99,7 +99,7 @@ fn export_har(state: State<'_, AppState>, host: Option<String>) -> Result<String
 }
 
 /// 安装当前生效的 CA 到当前用户根存储（HTTPS 解密所需）。
-/// `use_default_ca=true` 装内置默认共享 CA，否则装本机生成的 CA。
+/// `use_default_ca=true` 装内置默认 CA，否则装本机生成的 CA。
 #[tauri::command]
 fn install_ca(state: State<'_, AppState>, use_default_ca: bool) -> Result<String, String> {
     let pem = state
@@ -107,6 +107,12 @@ fn install_ca(state: State<'_, AppState>, use_default_ca: bool) -> Result<String
         .active_ca_pem(use_default_ca)
         .map_err(|e| e.to_string())?;
     sysint::install_ca_pem(&pem)
+}
+
+/// 删除本机 CA 并重新生成一张全新的（「创建新证书」）。
+#[tauri::command]
+fn regenerate_ca(state: State<'_, AppState>) -> Result<(), String> {
+    state.engine.regenerate_ca().map(|_| ()).map_err(|e| e.to_string())
 }
 
 /// 把系统代理设为 127.0.0.1:port（先备份原设置以便还原）。
@@ -201,7 +207,7 @@ impl Default for AppConfig {
             mitm: false,
             insecure: false,
             upstream: String::new(),
-            use_default_ca: false,
+            use_default_ca: true, // 默认用内置默认证书，省去每台机器生成/信任
         }
     }
 }
@@ -291,6 +297,7 @@ fn main() {
             get_config,
             set_config,
             clear_storage,
+            regenerate_ca,
         ])
         .run(tauri::generate_context!())
         .expect("error while running FlowMint Studio");

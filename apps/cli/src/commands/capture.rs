@@ -21,7 +21,7 @@ pub async fn start(
     println!("  将客户端的 HTTP 代理设为 {bind}");
     if mitm {
         if use_default_ca {
-            println!("  HTTPS MITM: 开 — 使用内置默认共享 CA（⚠️ 私钥公开，仅测试）");
+            println!("  HTTPS MITM: 开 — 使用内置默认证书");
         } else {
             let (path, _) = engine.ensure_ca()?;
             println!("  HTTPS MITM: 开 — 客户端需信任 CA: {}", path.display());
