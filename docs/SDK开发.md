@@ -104,6 +104,10 @@ fm.Start()
 注册拦截回调，在请求转发前 / 响应回传前改写 Body、状态码、头，或直接丢弃。
 **无需 MITM 也能对明文 HTTP 改包**；改 HTTPS 则先开 `fm_set_mitm` 并装证书。
 
+> **Body 压缩由 SDK 层透明处理**：回调拿到的 Body 已按 `Content-Encoding`（gzip/br/deflate/zstd）
+> **解压成明文**，直接当明文读写即可；一旦改写，SDK 会按原 `Content-Encoding`**重新压缩、保留该头**
+> （未改写的流量原样转发；未知编码则退化为明文并去掉该头）。所以改 JSON/文本响应时**不用自己解压/压缩**。
+
 可直接运行的完整 DEMO（自带本地源站 + 客户端，无需外网）：
 
 - **Python**：[sdks/python/demo_intercept.py](../sdks/python/demo_intercept.py)

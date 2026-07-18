@@ -36,6 +36,47 @@ fn try_decode(data: &[u8], f: fn(&[u8]) -> std::io::Result<Vec<u8>>) -> Vec<u8> 
     f(data).unwrap_or_else(|_| data.to_vec())
 }
 
+/// 按 `Content-Encoding` 把明文 `data` **重新压缩**（改包后保留原编码用）。
+/// 单一已知编码返回 `Some(压缩字节)`；`identity`/空/未知/多重/压缩失败返回 `None`
+/// （调用方据此改用明文并去掉 `Content-Encoding` 头）。
+pub fn encode_body(content_encoding: &str, data: &[u8]) -> Option<Vec<u8>> {
+    match content_encoding.trim().to_ascii_lowercase().as_str() {
+        "gzip" | "x-gzip" => encode_gzip(data).ok(),
+        "deflate" => encode_zlib(data).ok(),
+        "br" => encode_brotli(data).ok(),
+        "zstd" => encode_zstd(data).ok(),
+        _ => None, // identity/空/未知/多重编码：改用明文 + 去头
+    }
+}
+
+fn encode_gzip(data: &[u8]) -> std::io::Result<Vec<u8>> {
+    use std::io::Write;
+    let mut e = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    e.write_all(data)?;
+    e.finish()
+}
+
+fn encode_zlib(data: &[u8]) -> std::io::Result<Vec<u8>> {
+    use std::io::Write;
+    let mut e = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+    e.write_all(data)?;
+    e.finish()
+}
+
+fn encode_brotli(data: &[u8]) -> std::io::Result<Vec<u8>> {
+    use std::io::Write;
+    let mut out = Vec::new();
+    {
+        let mut w = brotli::CompressorWriter::new(&mut out, 4096, 5, 22);
+        w.write_all(data)?;
+    }
+    Ok(out)
+}
+
+fn encode_zstd(data: &[u8]) -> std::io::Result<Vec<u8>> {
+    zstd::stream::encode_all(data, 3)
+}
+
 fn read_capped<R: Read>(r: R) -> std::io::Result<Vec<u8>> {
     let mut out = Vec::new();
     r.take(MAX_DECODED as u64).read_to_end(&mut out)?;

@@ -14,6 +14,7 @@ pub struct InterceptMessage {
     pub url: String,
     pub status: Option<u16>,
     pub headers: Vec<(String, String)>,
+    /// 已按 `Content-Encoding` 解压的明文 Body。改写后代理会按原编码重新压缩、保留该头。
     pub body: Vec<u8>,
 }
 

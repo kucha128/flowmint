@@ -914,19 +914,52 @@ async fn request_breakpoint<S: FlowSink>(
     if !hook.enabled() {
         return Some((headers, body));
     }
+    // 给回调解压后的明文 body（按 Content-Encoding），改包侧无需自己解压/压缩。
+    let plain = decode::decode_body(header_value(&headers, "content-encoding").as_deref(), &body);
     let msg = InterceptMessage {
         is_response: false,
         method: method.to_string(),
         url: url.to_string(),
         status: None,
         headers: headers.clone(),
-        body: body.clone(),
+        body: plain,
     };
     match hook.intercept(msg).await {
-        Decision::Continue => Some((headers, body)),
-        Decision::Modify(e) => Some((e.headers, e.body)),
+        Decision::Continue => Some((headers, body)), // 未改：原样（压缩）转发
+        Decision::Modify(e) => {
+            let (headers, body) = reencode_edit(header_value(&headers, "content-encoding"), e);
+            Some((headers, body))
+        }
         Decision::Drop => None,
     }
+}
+
+/// 改包后的 body 是明文：若原来有可识别的 `Content-Encoding` 就按它**重新压缩**、保留该头；
+/// 否则（identity/未知）去掉该头、用明文。
+fn reencode_edit(orig_encoding: Option<String>, mut e: Edit) -> (Vec<(String, String)>, Vec<u8>) {
+    match orig_encoding
+        .as_deref()
+        .and_then(|enc| decode::encode_body(enc, &e.body))
+    {
+        Some(compressed) => (e.headers, compressed), // 保留 Content-Encoding
+        None => {
+            strip_content_encoding(&mut e.headers);
+            (e.headers, e.body)
+        }
+    }
+}
+
+/// 取某个头的值（大小写不敏感）。
+fn header_value(headers: &[(String, String)], name: &str) -> Option<String> {
+    headers
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case(name))
+        .map(|(_, v)| v.clone())
+}
+
+/// 去掉 Content-Encoding 头（body 改成明文后调用）。
+fn strip_content_encoding(headers: &mut Vec<(String, String)>) {
+    headers.retain(|(k, _)| !k.eq_ignore_ascii_case("content-encoding"));
 }
 
 /// 响应断点：回传前调用钩子。返回最终 (status, headers, body)；`None` 表示丢弃。
@@ -944,17 +977,23 @@ async fn response_breakpoint<S: FlowSink>(
     if !hook.enabled() {
         return Some((status, headers, body));
     }
+    // 给回调解压后的明文 body（按 Content-Encoding），改包侧无需自己解压/压缩。
+    let plain = decode::decode_body(header_value(&headers, "content-encoding").as_deref(), &body);
     let msg = InterceptMessage {
         is_response: true,
         method: method.to_string(),
         url: url.to_string(),
         status,
         headers: headers.clone(),
-        body: body.clone(),
+        body: plain,
     };
     match hook.intercept(msg).await {
-        Decision::Continue => Some((status, headers, body)),
-        Decision::Modify(e) => Some((e.status.or(status), e.headers, e.body)),
+        Decision::Continue => Some((status, headers, body)), // 未改：原样（压缩）转发
+        Decision::Modify(e) => {
+            let st = e.status.or(status);
+            let (headers, body) = reencode_edit(header_value(&headers, "content-encoding"), e);
+            Some((st, headers, body))
+        }
         Decision::Drop => None,
     }
 }

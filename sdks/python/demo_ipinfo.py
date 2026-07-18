@@ -13,10 +13,8 @@
 
 from __future__ import annotations
 
-import gzip
 import json
 import sys
-import zlib
 
 import flowmint
 
@@ -29,47 +27,20 @@ FAKE_IP = "12.34.56.78"
 PROXY_PORT = 18890
 
 
-def _decode_body(raw: bytes) -> str | None:
-    """尽力把（可能被 gzip/deflate 压缩的）响应体解成文本。"""
-    for dec in (
-        lambda b: b,
-        gzip.decompress,
-        zlib.decompress,
-        lambda b: zlib.decompress(b, -15),  # 裸 deflate
-    ):
-        try:
-            return dec(raw).decode("utf-8")
-        except Exception:
-            continue
-    return None
-
-
 def on_intercept(m: flowmint.Intercept) -> int:
-    # 只处理 ipinfo.io 的 /json（MITM 的 url 形如 https://ipinfo.io:443/json）
-    if "ipinfo.io" not in m.url or not m.url.endswith("/json"):
-        return flowmint.CONTINUE
-
-    if m.is_request:
-        # 让服务器返回不压缩，便于改写 JSON
-        m.set_header("Accept-Encoding", "identity")
-        print("[请求]", m.method, m.url)
+    # 只改 ipinfo.io 的 /json 响应（MITM 的 url 形如 https://ipinfo.io:443/json）。
+    # body 由 SDK 层按 Content-Encoding 解压后给到这里，改包侧直接当明文处理即可。
+    if m.is_response and "ipinfo.io" in m.url and m.url.endswith("/json"):
+        try:
+            data = json.loads(m.body.decode("utf-8"))
+        except Exception:
+            return flowmint.CONTINUE
+        old = data.get("ip")
+        data["ip"] = FAKE_IP
+        m.set_body(json.dumps(data).encode("utf-8"))
+        print(f"[改包] ip {old} -> {FAKE_IP}")
         return flowmint.MODIFY
-
-    text = _decode_body(m.body)
-    if text is None:
-        print("[跳过] 响应无法解析")
-        return flowmint.CONTINUE
-    try:
-        data = json.loads(text)
-    except Exception:
-        print("[跳过] 响应不是 JSON")
-        return flowmint.CONTINUE
-    old = data.get("ip")
-    data["ip"] = FAKE_IP
-    m.set_body(json.dumps(data).encode("utf-8"))
-    m.set_header("Content-Encoding", "identity")  # 已改成明文，去掉压缩标记
-    print(f"[改包] ip {old} -> {FAKE_IP}")
-    return flowmint.MODIFY
+    return flowmint.CONTINUE
 
 
 def press_any_key(prompt: str) -> None:
