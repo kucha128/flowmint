@@ -21,8 +21,11 @@ jobs:
           node-version: 20
 
       # 1) SDK 核心（flowmint.dll + 导入库）与 CLI（flowmint.exe）
-      - name: Build SDK + CLI
-        run: cargo build --release -p flowmint-ffi -p flowmint-cli
+      #    两者输出名都是 flowmint，必须分开编译，否则并行链接会撞对象文件（cargo#6313）。
+      - name: Build SDK core (flowmint.dll)
+        run: cargo build --release -p flowmint-ffi
+      - name: Build CLI (flowmint.exe)
+        run: cargo build --release -p flowmint-cli
 
       # 2) 桌面抓包工具（便携单 exe，依赖系统 WebView2）
       - name: Build desktop app
