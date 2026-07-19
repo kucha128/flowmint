@@ -390,7 +390,7 @@ dependencies = [
 
 [[package]]
 name = "flowmint-api"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "flowmint-engine",
@@ -405,7 +405,7 @@ dependencies = [
 
 [[package]]
 name = "flowmint-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -424,7 +424,7 @@ dependencies = [
 
 [[package]]
 name = "flowmint-engine"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "flowmint-model",
@@ -440,7 +440,7 @@ dependencies = [
 
 [[package]]
 name = "flowmint-ffi"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "flowmint-model",
  "flowmint-proxy-http",
@@ -452,7 +452,7 @@ dependencies = [
 
 [[package]]
 name = "flowmint-mcp"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "flowmint-engine",
@@ -468,7 +468,7 @@ dependencies = [
 
 [[package]]
 name = "flowmint-model"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -478,7 +478,7 @@ dependencies = [
 
 [[package]]
 name = "flowmint-proxy-http"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "brotli",
  "flate2",
@@ -494,7 +494,7 @@ dependencies = [
 
 [[package]]
 name = "flowmint-rules"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "flowmint-model",
  "serde",
@@ -504,7 +504,7 @@ dependencies = [
 
 [[package]]
 name = "flowmint-storage"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "flowmint-model",
  "hex",
@@ -517,7 +517,7 @@ dependencies = [
 
 [[package]]
 name = "flowmint-sysint"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "sha1",
  "winreg",
@@ -525,7 +525,7 @@ dependencies = [
 
 [[package]]
 name = "flowmint-tls"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "pem",
  "rcgen",
